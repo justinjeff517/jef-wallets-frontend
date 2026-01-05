@@ -1,0 +1,12 @@
+{
+    "cookie_exists":"boolean",
+    "is_valid":"string",
+    "message":"string", 
+    "module_number":"string",
+    "elapsed_time":"number-HH:MM ago",
+    "payload":{
+        "session_number":"strings-10-digits-partition-key", 
+        "entity_number":"string",
+        "employee_number":"string"
+    }
+}
