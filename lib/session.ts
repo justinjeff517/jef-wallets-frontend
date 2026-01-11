@@ -1,7 +1,8 @@
-// lib/specific/session.ts
+/* lib/session.ts */
 import "server-only"
 import { cookies } from "next/headers"
 import { EncryptJWT, jwtDecrypt, base64url } from "jose"
+import { SSMClient, GetParameterCommand } from "@aws-sdk/client-ssm"
 
 const SESSION_COOKIE_NAME = "jef_jwe_session" as const
 const SESSION_TTL_MS = 7 * 24 * 60 * 60 * 1000
@@ -14,13 +15,63 @@ function asStr(v: unknown) {
   return typeof v === "string" ? v.trim() : ""
 }
 
-function getSecretKey(): Uint8Array {
-  const secret = asStr(process.env[SESSION_SECRET_ENV])
-  if (!secret) throw new Error(`Missing env ${SESSION_SECRET_ENV}`)
+const AWS_REGION = asStr(process.env.AWS_REGION) || asStr(process.env.AWS_DEFAULT_REGION) || "ap-southeast-1"
+const ssm = new SSMClient({ region: AWS_REGION })
 
-  const key = base64url.decode(secret)
-  if (key.length !== 32) throw new Error(`Invalid key length: expected 32 bytes, got ${key.length}`)
-  return key
+let _keyPromise: Promise<Uint8Array> | null = null
+
+function decode32ByteKey(secret: string): Uint8Array {
+  const s = asStr(secret)
+  if (!s) throw new Error("Empty session secret value")
+
+  // base64url
+  try {
+    const k = base64url.decode(s)
+    if (k.length === 32) return k
+  } catch {}
+
+  // base64 (Node)
+  try {
+    const buf = Buffer.from(s, "base64")
+    const k = new Uint8Array(buf)
+    if (k.length === 32) return k
+  } catch {}
+
+  // best-effort length for error
+  let len = -1
+  try {
+    len = base64url.decode(s).length
+  } catch {}
+
+  throw new Error(`Invalid key length: expected 32 bytes, got ${len >= 0 ? len : "unknown"}`)
+}
+
+async function getSecretKey(): Promise<Uint8Array> {
+  if (_keyPromise) return _keyPromise
+
+  _keyPromise = (async () => {
+    const paramName = asStr(process.env[SESSION_SECRET_ENV])
+    if (!paramName) throw new Error(`Missing env ${SESSION_SECRET_ENV} (must be an SSM parameter name like /shared/...)`)
+
+    const resp = await ssm.send(
+      new GetParameterCommand({
+        Name: paramName,
+        WithDecryption: true,
+      })
+    )
+
+    const value = asStr(resp.Parameter?.Value)
+    if (!value) throw new Error(`SSM parameter has no value: ${paramName}`)
+
+    return decode32ByteKey(value)
+  })()
+
+  try {
+    return await _keyPromise
+  } catch (e) {
+    _keyPromise = null
+    throw e
+  }
 }
 
 export type SessionPayload = {
@@ -29,7 +80,7 @@ export type SessionPayload = {
 }
 
 async function encrypt(payload: Record<string, any>) {
-  const key = getSecretKey()
+  const key = await getSecretKey()
 
   return await new EncryptJWT(payload)
     .setProtectedHeader({ alg: "dir", enc: "A256GCM" })
@@ -43,19 +94,25 @@ export async function decrypt(token?: string): Promise<SessionPayload | null> {
   if (!t) return null
 
   try {
-    const key = getSecretKey()
+    const key = await getSecretKey()
     const { payload } = await jwtDecrypt(t, key, { clockTolerance: 10 })
 
-    const entity_number = payload.entity_number ? String(payload.entity_number) : ""
-    const employee_number = payload.employee_number ? String(payload.employee_number) : ""
+    const entity_number = payload.entity_number ? String(payload.entity_number).trim() : ""
+    const employee_number = payload.employee_number ? String(payload.employee_number).trim() : ""
 
     if (!entity_number || !employee_number) return null
-
     return { entity_number, employee_number }
-  } catch {
+  } catch (e: any) {
+    // IMPORTANT: don't leak token or secret; this is enough to diagnose
+    console.error("session.decrypt failed:", {
+      name: e?.name || "",
+      message: e?.message || "",
+      code: e?.code || "",
+    })
     return null
   }
 }
+
 
 export async function createSession(payload: SessionPayload) {
   const expiresAt = new Date(Date.now() + SESSION_TTL_MS)
