@@ -1,7 +1,7 @@
 "use client";
 
 import React, { useState, useEffect } from "react";
-import { ArrowUpRight, ArrowDownLeft, Wallet, History, ArrowRight } from "lucide-react";
+import { Wallet, History, ArrowRight } from "lucide-react";
 
 interface Ledger {
   ledger_id: string;
@@ -30,96 +30,95 @@ export default function LedgerPage() {
   const latestBalance = ledgers[0]?.balance_after ?? 0;
 
   return (
-    <div className="min-h-screen bg-white dark:bg-[#050505] text-slate-900 dark:text-slate-100">
+    // Background is pure black in dark mode for maximum contrast
+    <div className="min-h-screen bg-white dark:bg-black text-slate-900 dark:text-white">
       <main className="max-w-md mx-auto px-6 py-12">
         
-        {/* Simplified Non-Sticky Balance */}
-        <section className="mb-12">
-          <div className="flex items-center gap-2 mb-3 opacity-30">
-            <Wallet size={14} strokeWidth={2.5} />
-            <span className="text-[10px] font-black uppercase tracking-[0.2em]">Operating Capital</span>
+        {/* CRITICAL DATA: Total Balance */}
+        <section className="mb-10 p-5 rounded-xl border-2 border-slate-100 dark:border-slate-800 bg-slate-50/50 dark:bg-white/5">
+          <div className="flex items-center gap-2 mb-2">
+            <Wallet size={16} className="text-slate-600 dark:text-slate-300" />
+            <span className="text-xs font-bold uppercase tracking-wider text-slate-600 dark:text-slate-300">
+              Current Operating Capital
+            </span>
           </div>
-          <div className="flex items-baseline gap-1">
-            <span className="text-lg font-medium text-slate-400">₱</span>
-            <h2 className="text-3xl font-bold tracking-tight tabular-nums">
+          <div className="flex items-baseline gap-2">
+            <span className="text-2xl font-bold text-slate-500 dark:text-slate-400">₱</span>
+            <h2 className="text-4xl font-black tracking-tight tabular-nums">
               {loading ? "---" : latestBalance.toLocaleString(undefined, { minimumFractionDigits: 2 })}
             </h2>
           </div>
         </section>
 
-        {/* Header Label */}
-        <header className="flex items-center justify-between mb-6 border-b border-slate-100 dark:border-slate-900 pb-4">
+        <header className="flex items-center justify-between mb-4">
           <div className="flex items-center gap-2">
-            <History size={12} className="text-slate-400" />
-            <h3 className="text-[10px] font-black uppercase tracking-[0.2em] text-slate-400">
-              Transaction Ledger
+            <History size={16} className="text-slate-900 dark:text-white" />
+            <h3 className="text-sm font-bold uppercase text-slate-900 dark:text-white">
+              Transaction History
             </h3>
           </div>
           {!loading && (
-            <span className="text-[9px] font-bold text-emerald-500 bg-emerald-50 dark:bg-emerald-500/10 px-2 py-0.5 rounded-full">
-              {ledgers.length} ENTRIES
+            <span className="text-[10px] font-black bg-slate-900 dark:bg-white text-white dark:text-black px-2 py-1 rounded">
+              {ledgers.length} RECORDS
             </span>
           )}
         </header>
 
-        {/* Scrollable List */}
-        <div className="space-y-1">
+        {/* Ledger List */}
+        <div className="divide-y divide-slate-200 dark:divide-slate-800 border-t border-slate-200 dark:border-slate-800">
           {loading ? (
-            [...Array(8)].map((_, i) => (
-              <div key={i} className="h-16 w-full animate-pulse bg-slate-50 dark:bg-slate-900/50 rounded-lg mb-2" />
+            [...Array(6)].map((_, i) => (
+              <div key={i} className="py-6 animate-pulse bg-slate-50 dark:bg-slate-900/50" />
             ))
           ) : (
             ledgers.map((item) => (
-              <div 
-                key={item.ledger_id} 
-                className="group flex justify-between items-center py-4 border-b border-slate-50 dark:border-slate-900 last:border-0"
-              >
-                {/* Information Block */}
-                <div className="min-w-0 flex flex-col gap-1">
-                  <p className="text-[13px] font-bold leading-none tracking-tight">
+              <div key={item.ledger_id} className="py-5 flex justify-between items-start gap-4">
+                
+                {/* TRANSACTION DETAILS */}
+                <div className="flex-1 min-w-0">
+                  <p className="text-[15px] font-bold leading-tight mb-1 text-slate-900 dark:text-white">
                     {item.description}
                   </p>
                   
-                  <div className="flex items-center gap-1.5 text-[10px] text-slate-400 font-medium">
-                    <span className="truncate max-w-[100px]">
-                      {item.type === 'credit' ? item.sender_account_name : 'To Branch'}
+                  {/* Account Flow: Increased brightness for dark mode labels */}
+                  <div className="flex items-center gap-2 text-[11px] font-bold text-slate-600 dark:text-slate-300 mb-1">
+                    <span className="bg-slate-100 dark:bg-slate-800 px-1.5 py-0.5 rounded">
+                      {item.type === 'credit' ? item.sender_account_name : 'FROM: INTERNAL'}
                     </span>
-                    <ArrowRight size={8} className="opacity-30" />
-                    <span className="truncate max-w-[100px]">
-                      {item.type === 'debit' ? item.receiver_account_name : 'Farm Main'}
+                    <ArrowRight size={10} className="text-slate-400" />
+                    <span className="bg-slate-100 dark:bg-slate-800 px-1.5 py-0.5 rounded">
+                      {item.type === 'debit' ? item.receiver_account_name : 'TO: FARM MAIN'}
                     </span>
                   </div>
                   
-                  <p className="text-[9px] text-slate-300 dark:text-slate-700 font-mono uppercase tracking-tighter">
-                    {item.created_name}
+                  {/* Metadata: Creator */}
+                  <p className="text-[10px] font-medium text-slate-500 dark:text-slate-400 uppercase tracking-tight">
+                    Recorded by: {item.created_name}
                   </p>
                 </div>
 
-                {/* Amount Block */}
-                <div className="text-right flex flex-col items-end shrink-0">
-                  <div className="flex items-center gap-1">
-                    <span className={`text-[13px] font-black tabular-nums ${
-                      item.type === 'credit' ? 'text-emerald-500' : 'text-slate-900 dark:text-white'
-                    }`}>
-                      {item.type === 'credit' ? '+' : '-'}{item.amount.toLocaleString()}
-                    </span>
-                    <div className={`w-1 h-1 rounded-full ${
-                      item.type === 'credit' ? 'bg-emerald-500' : 'bg-slate-300 dark:bg-slate-700'
-                    }`} />
+                {/* FINANCIAL TOTALS */}
+                <div className="text-right shrink-0">
+                  <div className={`text-lg font-black tabular-nums ${
+                    item.type === 'credit' 
+                      ? 'text-emerald-600 dark:text-emerald-400' 
+                      : 'text-red-600 dark:text-red-400'
+                  }`}>
+                    {item.type === 'credit' ? '+' : '-'}{item.amount.toLocaleString()}
                   </div>
-                  <p className="text-[10px] font-bold text-slate-300 dark:text-slate-600 tabular-nums">
-                    {item.balance_after.toLocaleString()}
-                  </p>
+                  <div className="text-[11px] font-bold text-slate-500 dark:text-slate-400 mt-1">
+                    <span className="opacity-70 mr-1">BAL:</span>
+                    ₱{item.balance_after.toLocaleString()}
+                  </div>
                 </div>
               </div>
             ))
           )}
         </div>
 
-        {/* Footer info for 'Durable' feel */}
-        <footer className="mt-20 pt-8 border-t border-slate-50 dark:border-slate-900 text-center">
-          <p className="text-[9px] font-bold text-slate-300 dark:text-slate-700 uppercase tracking-[0.3em]">
-            End of Ledger Record
+        <footer className="mt-12 py-10 text-center border-t border-slate-100 dark:border-slate-900">
+          <p className="text-[10px] font-black text-slate-400 dark:text-slate-600 uppercase tracking-[0.4em]">
+            Verified Official Record
           </p>
         </footer>
       </main>

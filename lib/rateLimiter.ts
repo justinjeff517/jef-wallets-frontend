@@ -2,7 +2,7 @@ import { RateLimiterMemory } from "rate-limiter-flexible";
 import type { NextRequest } from "next/server";
 
 const limiter = new RateLimiterMemory({
-  points: 2,    // 5 requests
+  points: 8,    // 5 requests
   duration: 1,   // per 1 second
 });
 

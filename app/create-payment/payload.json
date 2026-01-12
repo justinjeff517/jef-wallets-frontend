@@ -7,6 +7,5 @@
     "type":"string-credit|debit",
     "description":"string",
     "amount":"number",
-    "created_by":"string",
     "ledger_id":"string-uuidv4"
 }
