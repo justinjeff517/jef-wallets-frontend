@@ -4,10 +4,8 @@ import * as React from "react"
 import {
   Check,
   ChevronsUpDown,
-  ArrowDownLeft,
   ArrowUpRight,
   Fingerprint,
-  RefreshCcw,
   ShieldCheck,
   CreditCard,
   History,
@@ -107,10 +105,9 @@ function AccountCombobox(props: {
           align="start"
         >
           <Command className="bg-popover text-popover-foreground">
-            <CommandInput placeholder="Search system accounts..." className="h-12" />
+            <CommandInput placeholder="Search accounts..." className="h-12" />
             <CommandList className="max-h-64">
               <CommandEmpty>No results found.</CommandEmpty>
-
               <CommandGroup>
                 {accounts.map((a) => (
                   <CommandItem
@@ -142,18 +139,27 @@ function AccountCombobox(props: {
 
 /* ----------------------------- page ----------------------------- */
 
+type SenderDetails = {
+  account_name: string
+  account_number: string
+  employee_name: string
+  employee_number: string
+}
+
 export default function Page() {
   const [accounts, setAccounts] = React.useState<Account[]>([])
   const [loadingAccounts, setLoadingAccounts] = React.useState(true)
-
   const [senderAccount, setSenderAccount] = React.useState<Account | null>(null)
   const [loadingSender, setLoadingSender] = React.useState(true)
+  const [processedByName, setProcessedByName] = React.useState("")
+  const [processedByNumber, setProcessedByNumber] = React.useState("")
 
-  const [type, setType] = React.useState<"credit" | "debit">("credit")
+  // Type is now fixed
+  const type = "debit"
+
   const [amount, setAmount] = React.useState("")
   const [receiver, setReceiver] = React.useState("")
-  const [createdBy, setCreatedBy] = React.useState("")
-  const [ledgerId, setLedgerId] = React.useState("") // ✅ hydration-safe
+  const [ledgerId, setLedgerId] = React.useState("")
   const [description, setDescription] = React.useState("")
 
   const [submitting, setSubmitting] = React.useState(false)
@@ -161,26 +167,23 @@ export default function Page() {
   const [msg, setMsg] = React.useState("")
 
   React.useEffect(() => {
-    // ✅ generate only on client after mount
     setLedgerId(makeUuid())
   }, [])
 
   React.useEffect(() => {
     let mounted = true
-
     ;(async () => {
       try {
         setLoadingSender(true)
-        setErr("")
-        const res = await fetch("/api/accounts/get-by-account-number", { cache: "no-store" })
-        const j = await res.json()
-        const acc = j?.account && typeof j.account === "object" ? j.account : null
+        const res = await fetch("/api/sender/get-sender-details", { cache: "no-store" })
+        const j: SenderDetails = await res.json()
         if (mounted) {
-          if (j?.exists && acc?.account_number) setSenderAccount(acc as Account)
-          else setErr(asStr(j?.message) || "Sender account not found.")
+          if (j?.account_number) setSenderAccount({ account_number: j.account_number, account_name: j.account_name })
+          if (j?.employee_name) setProcessedByName(j.employee_name)
+          if (j?.employee_number) setProcessedByNumber(j.employee_number)
         }
       } catch {
-        if (mounted) setErr("Failed to load sender account.")
+        if (mounted) setErr("Failed to load sender details.")
       } finally {
         if (mounted) setLoadingSender(false)
       }
@@ -191,8 +194,7 @@ export default function Page() {
         setLoadingAccounts(true)
         const res = await fetch("/api/accounts/get-all", { cache: "no-store" })
         const j = await res.json()
-        const list: Account[] = Array.isArray(j?.accounts) ? j.accounts : []
-        if (mounted) setAccounts(list)
+        if (mounted) setAccounts(Array.isArray(j?.accounts) ? j.accounts : [])
       } catch {
         if (mounted) setErr("Failed to load accounts.")
       } finally {
@@ -200,39 +202,34 @@ export default function Page() {
       }
     })()
 
-    return () => {
-      mounted = false
-    }
+    return () => { mounted = false }
   }, [])
 
   const senderNumber = asStr(senderAccount?.account_number || "")
   const senderName = asStr(senderAccount?.account_name || "")
-
   const amountNum = Number(amount || "0")
+
   const canSubmit =
     !loadingAccounts &&
     !loadingSender &&
     !submitting &&
-    !!asStr(ledgerId) && // ✅ ensure generated
+    !!asStr(ledgerId) &&
     isFinite(amountNum) &&
     amountNum > 0 &&
     !!senderNumber &&
     !!asStr(receiver) &&
     receiver !== senderNumber &&
-    !!asStr(createdBy) &&
+    !!asStr(processedByNumber) &&
     !!asStr(description)
 
   async function submit(e: React.FormEvent) {
     e.preventDefault()
+    if (!canSubmit) return
+
+    setSubmitting(true)
     setErr("")
     setMsg("")
 
-    if (!canSubmit) {
-      setErr("Please complete all fields.")
-      return
-    }
-
-    setSubmitting(true)
     try {
       const payload = {
         account_number: senderNumber,
@@ -240,22 +237,21 @@ export default function Page() {
         sender_account_name: senderName,
         receiver_account_number: receiver,
         receiver_account_name: accounts.find((x) => x.account_number === receiver)?.account_name || "",
-        type,
+        type, // Fixed at "debit"
         description: asStr(description),
         amount: amountNum,
-        created_by: asStr(createdBy),
+        created_by: processedByNumber,
         ledger_id: ledgerId,
       }
 
-      console.log(payload)
-
-      setMsg("Transfer prepared.")
-      setLedgerId(makeUuid()) // ✅ client-only (event handler)
+      console.log("Submitting Payment:", payload)
+      setMsg("Debit transfer authorized.")
+      setLedgerId(makeUuid())
       setAmount("")
       setDescription("")
       setReceiver("")
     } catch (e: any) {
-      setErr(asStr(e?.message) || "Failed to submit.")
+      setErr(asStr(e?.message) || "Transaction failed.")
     } finally {
       setSubmitting(false)
     }
@@ -263,36 +259,32 @@ export default function Page() {
 
   return (
     <main className="mx-auto w-full max-w-md min-h-screen p-4 pb-20 bg-background text-foreground">
-      <header className="flex items-center justify-between px-1 pt-1 mb-4">
+      <header className="flex items-center justify-between px-1 pt-1 mb-6">
         <div>
           <h1 className="text-base font-black tracking-tight">Vault Terminal</h1>
           <p className="text-[10px] font-bold text-muted-foreground uppercase tracking-widest">
-            JEF Industries Ledger v3
+            JEF Industries Ledger v3 • Payment Mode
           </p>
         </div>
+        {/* Grayscale header icon */}
         <div className="bg-foreground text-background p-2 rounded-2xl shadow-sm">
           <Fingerprint size={18} />
         </div>
       </header>
 
       <form onSubmit={submit} className="space-y-4">
-        {/* Amount */}
+        {/* Amount Section */}
         <section className="space-y-1.5">
           <Label className="text-[10px] uppercase tracking-[0.2em] text-muted-foreground font-black ml-1 text-center block">
-            Transaction Amount
+            Payment Amount (PHP)
           </Label>
-
           <div className="relative">
             <div className="absolute left-4 top-1/2 -translate-y-1/2 text-2xl font-black text-muted-foreground/25">
               ₱
             </div>
             <Input
-              className={cn(
-                "h-20 pl-10 text-3xl font-black text-center rounded-3xl border-none shadow-sm",
-                "bg-card text-card-foreground",
-                "focus-visible:ring-2 focus-visible:ring-ring",
-                "placeholder:text-muted-foreground/30"
-              )}
+              // Grayscale focus ring
+              className="h-20 pl-10 text-3xl font-black text-center rounded-3xl border-none shadow-sm bg-card text-card-foreground focus-visible:ring-2 focus-visible:ring-ring"
               inputMode="decimal"
               placeholder="0.00"
               value={amount}
@@ -302,177 +294,96 @@ export default function Page() {
               }}
             />
           </div>
-
-          {senderNumber && receiver && receiver === senderNumber && (
-            <div className="text-[11px] font-bold text-destructive text-center">
-              Source and destination must be different.
-            </div>
-          )}
         </section>
 
-        {/* Type toggle */}
-        <section className="space-y-2">
-          <div className="bg-muted p-1 rounded-2xl flex gap-1">
-            <button
-              type="button"
-              onClick={() => setType("credit")}
-              className={cn(
-                "flex-1 flex items-center justify-center gap-2 h-11 rounded-xl text-[11px] font-black uppercase tracking-wider transition",
-                type === "credit"
-                  ? "bg-background text-emerald-600 shadow-sm ring-1 ring-border"
-                  : "text-muted-foreground hover:text-foreground"
-              )}
-            >
-              <ArrowDownLeft size={16} strokeWidth={3} />
-              Credit
-            </button>
-
-            <button
-              type="button"
-              onClick={() => setType("debit")}
-              className={cn(
-                "flex-1 flex items-center justify-center gap-2 h-11 rounded-xl text-[11px] font-black uppercase tracking-wider transition",
-                type === "debit"
-                  ? "bg-background text-rose-600 shadow-sm ring-1 ring-border"
-                  : "text-muted-foreground hover:text-foreground"
-              )}
-            >
-              <ArrowUpRight size={16} strokeWidth={3} />
-              Debit
-            </button>
-          </div>
-
-          <Card className="rounded-3xl border border-border bg-card text-card-foreground shadow-sm overflow-hidden">
-            <CardContent className="p-4 space-y-3">
-              {/* Fixed Sender */}
-              <div className="space-y-1.5">
-                <Label className="text-[10px] uppercase tracking-[0.15em] text-muted-foreground font-black ml-1">
-                  Source Account
-                </Label>
-
-                <div
-                  className={cn(
-                    "h-14 w-full px-4 rounded-2xl shadow-sm border border-border",
-                    "bg-muted/60 text-foreground",
-                    "flex items-center justify-between"
-                  )}
-                >
-                  <div className="flex items-center gap-3 min-w-0">
-                    <div className="bg-foreground text-background p-2 rounded-xl shadow-sm shrink-0">
-                      <CreditCard size={16} />
-                    </div>
-
-                    <div className="flex flex-col min-w-0">
-                      <span className="text-xs font-black truncate">
-                        {loadingSender ? "Loading sender..." : senderName || "Unknown account"}
-                      </span>
-                      <span className="text-[10px] font-mono text-muted-foreground leading-none truncate">
-                        {loadingSender ? "---- ----" : senderNumber || "---- ----"}
-                      </span>
-                    </div>
+        {/* Account Flow Section */}
+        <Card className="rounded-3xl border border-border bg-card text-card-foreground shadow-sm overflow-hidden">
+          <CardContent className="p-4 space-y-3">
+            {/* Fixed Source */}
+            <div className="space-y-1.5">
+              <Label className="text-[10px] uppercase tracking-[0.15em] text-muted-foreground font-black ml-1">
+                Source (Debit From)
+              </Label>
+              <div className="h-14 w-full px-4 rounded-2xl shadow-sm border border-border bg-muted/60 flex items-center justify-between">
+                <div className="flex items-center gap-3 min-w-0">
+                  <div className="bg-foreground text-background p-2 rounded-xl shrink-0">
+                    <CreditCard size={16} />
                   </div>
-
-                  <span className="text-[10px] font-black uppercase tracking-widest text-muted-foreground">
-                    fixed
-                  </span>
+                  <div className="flex flex-col min-w-0">
+                    <span className="text-xs font-black truncate">{loadingSender ? "Loading..." : senderName}</span>
+                    <span className="text-[10px] font-mono text-muted-foreground leading-none truncate">{senderNumber || "---- ----"}</span>
+                  </div>
                 </div>
+                {/* Grayscale fixed badge */}
+                <span className="text-[10px] font-black uppercase tracking-widest text-muted-foreground">Fixed</span>
               </div>
+            </div>
 
-              <div className="flex items-center gap-3 px-1">
-                <div className={cn("h-[2px] flex-1 rounded-full", type === "credit" ? "bg-emerald-500/20" : "bg-rose-500/20")} />
-                <div
-                  className={cn(
-                    "p-2 rounded-full border shadow-sm",
-                    "bg-background border-border",
-                    type === "credit" ? "text-emerald-500" : "text-rose-500"
-                  )}
-                >
-                  <RefreshCcw size={14} strokeWidth={3} className={cn(type === "debit" && "rotate-180")} />
-                </div>
-                <div className={cn("h-[2px] flex-1 rounded-full", type === "credit" ? "bg-emerald-500/20" : "bg-rose-500/20")} />
+            {/* Visual Connector - Grayscale */}
+            <div className="flex items-center gap-3 px-1">
+              <div className="h-[2px] flex-1 rounded-full bg-border" />
+              <div className="p-2 rounded-full border shadow-sm bg-background border-border text-foreground">
+                <ArrowUpRight size={14} strokeWidth={3} />
               </div>
+              <div className="h-[2px] flex-1 rounded-full bg-border" />
+            </div>
 
-              {/* Selectable Receiver */}
-              <AccountCombobox
-                label="Destination Account"
-                value={receiver}
-                onChange={setReceiver}
-                accounts={accounts.filter((a) => a.account_number !== senderNumber)}
-                disabled={loadingAccounts || loadingSender || !senderNumber}
-                icon={History}
-              />
-            </CardContent>
-          </Card>
-        </section>
+            {/* Selectable Destination */}
+            <AccountCombobox
+              label="Destination (Credit To)"
+              value={receiver}
+              onChange={setReceiver}
+              accounts={accounts.filter((a) => a.account_number !== senderNumber)}
+              disabled={loadingAccounts || loadingSender || !senderNumber}
+              icon={History}
+            />
+          </CardContent>
+        </Card>
 
-        {/* Audit / memo */}
+        {/* Audit Section */}
         <section className="rounded-3xl p-4 shadow-sm border border-border bg-card text-card-foreground space-y-3">
           <div className="grid grid-cols-2 gap-3">
             <div className="space-y-1">
-              <Label className="text-[9px] font-black uppercase tracking-widest text-muted-foreground">
-                Processed By
-              </Label>
-              <Input
-                className="h-10 rounded-xl bg-muted border-none font-mono text-xs font-bold"
-                placeholder="00031"
-                value={createdBy}
-                onChange={(e) => setCreatedBy(e.target.value)}
-              />
+              <Label className="text-[9px] font-black uppercase tracking-widest text-muted-foreground">Processor</Label>
+              <div className="h-10 px-3 flex items-center bg-muted rounded-xl text-[11px] font-black truncate">
+                {processedByName || "—"}
+              </div>
             </div>
-
             <div className="space-y-1">
-              <Label className="text-[9px] font-black uppercase tracking-widest text-muted-foreground">
-                Trace ID
-              </Label>
+              <Label className="text-[9px] font-black uppercase tracking-widest text-muted-foreground">Trace ID</Label>
               <div className="h-10 px-3 flex items-center bg-muted rounded-xl text-[10px] font-mono text-muted-foreground truncate">
-                {(asStr(ledgerId).split("-")[0] || "—") + "..."}
+                {ledgerId.split("-")[0]}...
               </div>
             </div>
           </div>
 
           <div className="space-y-1">
-            <Label className="text-[9px] font-black uppercase tracking-widest text-muted-foreground">
-              Transaction Memo
-            </Label>
+            <Label className="text-[9px] font-black uppercase tracking-widest text-muted-foreground">Transaction Memo</Label>
             <Textarea
+               // Grayscale focus ring
               className="min-h-[76px] rounded-2xl bg-muted border-none p-3 text-xs font-medium resize-none focus-visible:ring-1 focus-visible:ring-ring"
-              placeholder="e.g. Monthly Inventory Liquidation"
+              placeholder="Reason for payment..."
               value={description}
               onChange={(e) => setDescription(e.target.value)}
             />
           </div>
         </section>
 
-        {/* Messages + submit */}
+        {/* Action Section */}
         <section className="space-y-3">
-          {err ? (
-            <div className="p-3 rounded-2xl bg-destructive/10 text-destructive text-[11px] font-bold text-center">
-              {err}
-            </div>
-          ) : null}
-          {msg ? (
-            <div className="p-3 rounded-2xl bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 text-[11px] font-bold text-center">
-              {msg}
-            </div>
-          ) : null}
+          {/* Grayscale error/success messages */}
+          {err && <div className="p-3 rounded-2xl bg-neutral-100 text-neutral-900 dark:bg-neutral-800 dark:text-neutral-50 text-[11px] font-bold text-center border border-neutral-200 dark:border-neutral-700">{err}</div>}
+          {msg && <div className="p-3 rounded-2xl bg-neutral-100 text-neutral-900 dark:bg-neutral-800 dark:text-neutral-50 text-[11px] font-bold text-center border border-neutral-200 dark:border-neutral-700">{msg}</div>}
 
           <Button
-            className={cn(
-              "h-16 w-full rounded-3xl font-black text-lg shadow-lg",
-              "bg-primary text-primary-foreground",
-              "hover:bg-primary/90",
-              "active:scale-[0.98] transition disabled:opacity-30 disabled:grayscale flex gap-3"
-            )}
+            // Grayscale button theme (foreground/background inverse)
+            className="h-16 w-full rounded-3xl font-black text-lg shadow-lg bg-foreground text-background hover:bg-foreground/90 active:scale-[0.98] transition disabled:opacity-30 flex gap-3"
             type="submit"
             disabled={!canSubmit}
           >
             <ShieldCheck size={20} strokeWidth={3} />
-            {submitting ? "Authorizing..." : "Authorize Transfer"}
+            {submitting ? "Processing..." : "Confirm Payment"}
           </Button>
-
-          <p className="text-[10px] text-muted-foreground text-center">
-            {loadingAccounts || loadingSender ? "Loading…" : `${accounts.length} accounts loaded • sender fixed: ${senderNumber || "—"}`}
-          </p>
         </section>
       </form>
     </main>
