@@ -5,6 +5,7 @@ import { useMemo } from "react"
 import { usePathname } from "next/navigation"
 
 import { ModuleBreadcrumb } from "@/components/shared/ModuleBreadcrumb"
+import { ProfileDropdown } from "@/components/shared/ProfileDropdown"
 
 type Props = {
   className?: string
@@ -35,11 +36,10 @@ function titleFromPath(pathname: string) {
 export function HeaderNavbar(props: Props) {
   const pathname = usePathname()
 
-  const title = useMemo(() => {
+  useMemo(() => {
     const fromProp = (props.title || "").trim()
     if (fromProp) return fromProp
 
-    // optional client-side fallback (if you ever set it)
     const fromPublicEnv = (process.env.NEXT_PUBLIC_MODULE_NAME || "").trim()
     if (fromPublicEnv) return fromPublicEnv
 
@@ -62,41 +62,32 @@ export function HeaderNavbar(props: Props) {
     >
       <div
         className={[
-          "mx-auto grid h-10 w-full grid-cols-8 items-center gap-2 px-3",
+          "mx-auto flex h-10 w-full items-center gap-2 px-3",
           props.maxWidthClassName || "max-w-5xl",
           props.containerClassName,
         ]
           .filter(Boolean)
           .join(" ")}
       >
-        <div className="col-span-2 min-w-0">
-          <div
-            className={[
-              "truncate text-[13px] font-semibold leading-none tracking-tight text-foreground",
-              props.titleClassName,
-            ]
-              .filter(Boolean)
-              .join(" ")}
-            style={{ fontFamily: "var(--font-geist-sans), ui-sans-serif, system-ui" }}
-            title={title}
-          >
-            {title}
-          </div>
-        </div>
-
-        <div className="col-span-6 min-w-0 overflow-hidden">
-          <div className="flex w-full min-w-0 items-center overflow-hidden">
-            {showBreadcrumb ? (
+        {/* CENTER: Breadcrumb */}
+        <div className="flex flex-1 items-center justify-start overflow-hidden px-2">
+          {showBreadcrumb ? (
+            <div className="min-w-0 max-w-full">
               <ModuleBreadcrumb
                 className={[
-                  "min-w-0 max-w-full truncate text-xs font-semibold leading-none tracking-tight",
+                  "truncate text-xs font-semibold leading-none tracking-tight",
                   props.breadcrumbClassName,
                 ]
                   .filter(Boolean)
                   .join(" ")}
               />
-            ) : null}
-          </div>
+            </div>
+          ) : null}
+        </div>
+
+        {/* RIGHT: Profile */}
+        <div className="flex shrink-0 items-center justify-end">
+          <ProfileDropdown />
         </div>
       </div>
     </header>

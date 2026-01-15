@@ -3,7 +3,6 @@ import type { Metadata } from "next"
 import { Geist, Geist_Mono } from "next/font/google"
 import "./globals.css"
 import { ThemeProvider } from "next-themes"
-import { FooterNavbar } from "@/components/shared/FooterNavbar"
 import { HeaderNavbar } from "@/components/shared/HeaderNavbar"
 
 const geistSans = Geist({
@@ -16,28 +15,26 @@ const geistMono = Geist_Mono({
   subsets: ["latin"],
 })
 
-export const metadata: Metadata = {
-  title: "Wallets",
-  description: "JEF Wallets",
+function asStr(v: unknown) {
+  return typeof v === "string" ? v.trim() : ""
 }
 
-export default function RootLayout({
-  children,
-}: Readonly<{
-  children: React.ReactNode
-}>) {
-  const moduleName =
-    (process.env.MODULE_NAME || "").trim() ||
-    (process.env.NEXT_PUBLIC_MODULE_NAME || "").trim() ||
-    ""
+const MODULE_NAME = asStr(process.env.MODULE_NAME)
 
+export const metadata: Metadata = {
+  title: MODULE_NAME,
+  description: "Main Messaging System of JEF",
+}
+
+export default function RootLayout(props: { children: React.ReactNode }) {
   return (
     <html lang="en" suppressHydrationWarning>
-      <body className={`${geistSans.variable} ${geistMono.variable} antialiased min-h-screen`}>
-        <ThemeProvider attribute="class" defaultTheme="system" enableSystem>
-          <HeaderNavbar title={moduleName || undefined} titleFallback="Module" />
-          <main>{children}</main>
-          <FooterNavbar />
+      <body className={`${geistSans.variable} ${geistMono.variable} antialiased`}>
+        <ThemeProvider attribute="class" defaultTheme="system" enableSystem disableTransitionOnChange>
+          <div className="min-h-dvh">
+            <HeaderNavbar title={MODULE_NAME || undefined} titleFallback="Module" />
+            <main>{props.children}</main>
+          </div>
         </ThemeProvider>
       </body>
     </html>

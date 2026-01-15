@@ -1,4 +1,4 @@
-// app/api/iam/allowed-modules/route.ts
+// H:\github10\jef-portal-frontend\app\api\shared\get-allowed-modules-by-entity-number\route.ts
 import { NextRequest, NextResponse } from "next/server"
 import { LambdaClient, InvokeCommand } from "@aws-sdk/client-lambda"
 

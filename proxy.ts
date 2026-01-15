@@ -1,19 +1,22 @@
+/* proxy.ts */
 import type { NextRequest } from "next/server"
 import { NextResponse } from "next/server"
-import { jwtDecrypt, base64url } from "jose"
 import { LambdaClient, InvokeCommand } from "@aws-sdk/client-lambda"
+import { decrypt } from "@/lib/session"
 
-const SESSION_COOKIE_NAME = "jef_jwe_session" as const
-const SESSION_SECRET_ENV = "JEF_JWE_SESSION_SECRET_ENV" as const
+const COOKIE_NAME_BASE = "jef_jwe_session" as const
+const COOKIE_NAME_SECURE = `__Secure-${COOKIE_NAME_BASE}` as const
+const COOKIE_NAME_HOST = `__Host-${COOKIE_NAME_BASE}` as const
 
-const AWS_REGION = process.env.AWS_REGION || "ap-southeast-1"
+const LOGIN_URL = (process.env.LOGIN_URL || "https://login.jefoffice.com/").trim()
+const ACCESS_DENIED_PATH = "/shared/access-denied"
+
+const AWS_REGION = (process.env.AWS_REGION || "ap-southeast-1").trim()
 const LAMBDA_ARN =
-  process.env.LAMBDA_ARN ||
-  "arn:aws:lambda:ap-southeast-1:246715082475:function:jef-iam-validate-entity-number-and-module-number"
+  (process.env.LAMBDA_ARN ||
+    "arn:aws:lambda:ap-southeast-1:246715082475:function:jef-iam-validate-entity-number-and-module-number").trim()
 
 const MODULE_NUMBER = (process.env.MODULE_NUMBER || "").trim()
-
-const IS_DEV = process.env.NODE_ENV === "development"
 
 function asStr(v: unknown) {
   return typeof v === "string" ? v.trim() : ""
@@ -33,7 +36,7 @@ function safeJsonParse(s: string) {
 
 function readBody(raw: any) {
   const obj = safeObj(raw)
-  const body = (obj as any).body
+  const body = obj.body
   if (body == null) return obj
   if (typeof body === "object") return body
   if (typeof body === "string") {
@@ -43,85 +46,21 @@ function readBody(raw: any) {
   return { _raw_body: String(body) }
 }
 
-const LOGIN_URL = asStr(process.env.LOGIN_URL || "https://login.jefoffice.com/")
-
-const ACCESS_DENIED_PATH = "/shared/access-denied"
-
-let cachedKey: Uint8Array | null = null
-
-const ALLOWED_PATHS = new Set([
-  "/api/login",
-  "/api/shared/session/validate",
-  "/api/shared/session/delete-one",
-  "/api/entities/get-entity-by-entity-number",
-  ACCESS_DENIED_PATH,
-])
+function getToken(req: NextRequest): string {
+  return (
+    asStr(req.cookies.get(COOKIE_NAME_BASE)?.value) ||
+    asStr(req.cookies.get(COOKIE_NAME_SECURE)?.value) ||
+    asStr(req.cookies.get(COOKIE_NAME_HOST)?.value) ||
+    ""
+  )
+}
 
 const lam = new LambdaClient({ region: AWS_REGION })
 
-function getSecretKey(): Uint8Array {
-  if (cachedKey) return cachedKey
-  const secret = asStr(process.env[SESSION_SECRET_ENV])
-  if (!secret) throw new Error(`Missing env ${SESSION_SECRET_ENV}`)
-  cachedKey = base64url.decode(secret)
-  return cachedKey
-}
-
-function getToken(req: NextRequest): string {
-  return (
-    asStr(req.cookies.get(SESSION_COOKIE_NAME)?.value) ||
-    asStr(req.cookies.get(`__Secure-${SESSION_COOKIE_NAME}`)?.value) ||
-    asStr(req.cookies.get(`__Host-${SESSION_COOKIE_NAME}`)?.value)
-  )
-}
-
-async function readSessionPayload(
-  token: string
-): Promise<{ entity_number: string; employee_number: string } | null> {
-  try {
-    const key = getSecretKey()
-    const { payload } = await jwtDecrypt(token, key, { clockTolerance: 10 })
-    const raw: any = payload || {}
-    const entity_number = asStr(raw.entity_number)
-    const employee_number = asStr(raw.employee_number)
-    if (!entity_number || !employee_number) return null
-    return { entity_number, employee_number }
-  } catch {
-    return null
-  }
-}
-
-function isAlwaysAllowed(pathname: string) {
-  return (
-    ALLOWED_PATHS.has(pathname) ||
-    pathname.startsWith("/_next/") ||
-    pathname === "/favicon.ico" ||
-    /\.(png|jpg|jpeg|gif|webp|svg|ico|css|js|map|txt)$/.test(pathname)
-  )
-}
-
-function redirectToLogin(req: NextRequest) {
-  const loginUrl = new URL(LOGIN_URL)
-  const returnTo = req.nextUrl.href
-
-  if (req.nextUrl.origin === loginUrl.origin) {
-    return NextResponse.redirect(new URL("/", req.nextUrl.origin))
-  }
-
-  loginUrl.searchParams.set("return_to", returnTo)
-  return NextResponse.redirect(loginUrl)
-}
-
-function redirectToAccessDenied(req: NextRequest) {
-  const url = new URL(ACCESS_DENIED_PATH, req.nextUrl.origin)
-  url.searchParams.set("return_to", req.nextUrl.href)
-  return NextResponse.redirect(url)
-}
-
-async function invokeValidate(entity_number: string) {
+async function invokeValidate(entity_number: string, module_number: string) {
   const payload = {
-    module_number: MODULE_NUMBER,
     entity_number: String(entity_number),
+    module_number: String(module_number),
   }
 
   const cmd = new InvokeCommand({
@@ -134,93 +73,83 @@ async function invokeValidate(entity_number: string) {
 
   const rawStr = r.Payload ? new TextDecoder().decode(r.Payload) : ""
   const parsedTop = safeJsonParse(rawStr)
-  const body = readBody(parsedTop)
+  const body = readBody(parsedTop ?? rawStr)
+
+  const b = safeObj(body)
+  const is_allowed = b.is_allowed === true || b.is_valid === true
 
   return {
+    is_allowed,
     status_code: r.StatusCode ?? 200,
     function_error: r.FunctionError ?? null,
     executed_version: r.ExecutedVersion ?? null,
-    request: payload,
-    raw_response: parsedTop ?? rawStr,
-    response: body,
+    response: b,
   }
 }
 
-function isLambdaOk(body: any): boolean {
-  const b = safeObj(body) as any
-  const v = b.is_valid
-  if (typeof v === "boolean") return v
-  if (typeof v === "string") return v.trim().toLowerCase() === "true"
-  return false
+function redirectToLogin(request: NextRequest) {
+  const return_to = request.nextUrl.href
+  const login = new URL(LOGIN_URL)
+  login.searchParams.set("return_to", return_to)
+  return NextResponse.redirect(login)
 }
 
-export default async function proxy(req: NextRequest) {
-  if (IS_DEV) return NextResponse.next()
+export async function proxy(request: NextRequest) {
+  const { pathname } = request.nextUrl
 
-  const path = req.nextUrl.pathname
-
-  if (isAlwaysAllowed(path)) return NextResponse.next()
-
-  const token = getToken(req)
-  if (!token) {
-    if (path.startsWith("/api/")) return NextResponse.json({ message: "Unauthorized" }, { status: 401 })
-    return redirectToLogin(req)
-  }
-
-  const session = await readSessionPayload(token)
-  if (!session?.entity_number) {
-    if (path.startsWith("/api/")) return NextResponse.json({ message: "Unauthorized" }, { status: 401 })
-    return redirectToLogin(req)
-  }
-
-  if (!MODULE_NUMBER) {
-    if (path.startsWith("/api/")) return NextResponse.json({ message: "Unauthorized" }, { status: 401 })
-    return redirectToLogin(req)
-  }
-
-  try {
-    const inv = await invokeValidate(session.entity_number)
-
-    const lambdaSaysNo = !inv.function_error && !isLambdaOk(inv.response)
-    if (lambdaSaysNo) {
-      if (path.startsWith("/api/")) {
-        return NextResponse.json(
-          { message: "Access denied" },
-          {
-            status: 403,
-            headers: {
-              "x-lambda-status": String(inv.status_code ?? ""),
-            },
-          }
-        )
-      }
-      return redirectToAccessDenied(req)
-    }
-
-    const ok = !inv.function_error && isLambdaOk(inv.response)
-    if (!ok) {
-      if (path.startsWith("/api/")) {
-        return NextResponse.json(
-          { message: "Unauthorized" },
-          {
-            status: 401,
-            headers: {
-              "x-lambda-status": String(inv.status_code ?? ""),
-              ...(inv.function_error ? { "x-lambda-function-error": String(inv.function_error) } : {}),
-            },
-          }
-        )
-      }
-      return redirectToLogin(req)
-    }
-
+  // avoid redirect loops
+  if (pathname.startsWith(ACCESS_DENIED_PATH)) {
     return NextResponse.next()
+  }
+
+  const token = getToken(request)
+
+  // no cookie -> redirect to login
+  if (!token) {
+    return redirectToLogin(request)
+  }
+
+  // cookie exists -> decrypt payload -> get entity_number
+  let entity_number = ""
+  try {
+    const payload: any = await decrypt(token)
+    entity_number = asStr(payload?.entity_number)
   } catch {
-    if (path.startsWith("/api/")) return NextResponse.json({ message: "Unauthorized" }, { status: 401 })
-    return redirectToLogin(req)
+    entity_number = ""
+  }
+
+  // invalid session -> redirect to login
+  if (!entity_number) {
+    return redirectToLogin(request)
+  }
+
+  // missing module env -> deny
+  if (!MODULE_NUMBER) {
+    return NextResponse.redirect(new URL(ACCESS_DENIED_PATH, request.url))
+  }
+
+  // validate via lambda
+  try {
+    const v = await invokeValidate(entity_number, MODULE_NUMBER)
+
+    if (v.function_error) {
+      return NextResponse.redirect(new URL(ACCESS_DENIED_PATH, request.url))
+    }
+
+    if (v.is_allowed) {
+      return NextResponse.next()
+    }
+
+    return NextResponse.redirect(new URL(ACCESS_DENIED_PATH, request.url))
+  } catch {
+    return NextResponse.redirect(new URL(ACCESS_DENIED_PATH, request.url))
   }
 }
 
 export const config = {
-  matcher: ["/((?!_next/static|_next/image|favicon.ico).*)"],
+  matcher: [
+    "/about/:path*",
+    "/dashboard/:path*",
+    "/((?!api|_next/static|_next/image|.*\\.png$).*)",
+  ],
 }

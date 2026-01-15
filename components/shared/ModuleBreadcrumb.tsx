@@ -1,9 +1,9 @@
 /* src/components/shared/ModuleBreadcrumb.tsx */
 "use client"
 
-import { useMemo } from "react"
+import { useEffect, useMemo, useState } from "react"
 import Link from "next/link"
-import { usePathname } from "next/navigation"
+import { usePathname, useRouter } from "next/navigation"
 
 import {
   Breadcrumb,
@@ -44,6 +44,9 @@ type Props = {
   preferTail?: boolean
   treatGroupsAsOverflow?: boolean
   collapseToTwoLayersAt?: number
+
+  // NEW: label width clamp (Tailwind max-w class)
+  labelMaxWClass?: string
 }
 
 function asStr(v: unknown) {
@@ -88,8 +91,13 @@ function uniqKey(label: string, href: string, idx: number) {
   return `${label}::${href || ""}::${idx}`
 }
 
+function cx(...xs: Array<string | undefined | null | false>) {
+  return xs.filter(Boolean).join(" ")
+}
+
 export function ModuleBreadcrumb(p?: Props) {
   const props = (p || {}) as Props
+  const router = useRouter()
   const pathnameRaw = usePathname() || "/"
 
   const homeHref = asStr(props.homeHref) || "/"
@@ -110,6 +118,9 @@ export function ModuleBreadcrumb(p?: Props) {
   const manualCrumbs = Array.isArray(props.crumbs) ? props.crumbs : null
   const manualCurrent = asStr(props.current)
   const extraOverflow = Array.isArray(props.overflow) ? props.overflow : []
+
+  // NEW: clamp label width so breadcrumb never becomes 2 lines
+  const labelMaxWClass = asStr(props.labelMaxWClass) || "max-w-[8rem] sm:max-w-[10rem]"
 
   const built = useMemo(() => {
     if (manualCrumbs) {
@@ -197,21 +208,51 @@ export function ModuleBreadcrumb(p?: Props) {
     }
   }, [collapseToTwoLayers, crumbs, current, overflow])
 
+  const [menuOpen, setMenuOpen] = useState(false)
+
+  useEffect(() => {
+    if (!menuOpen) return
+
+    const hrefs = view.dropdown.map((g) => asStr(g.href)).filter(Boolean)
+
+    const seen = new Set<string>()
+    for (const href of hrefs) {
+      if (seen.has(href)) continue
+      seen.add(href)
+      try {
+        router.prefetch(href)
+      } catch {}
+    }
+  }, [menuOpen, router, view.dropdown])
+
+  function go(href: string) {
+    const h = asStr(href)
+    if (!h) return
+    setMenuOpen(false)
+    router.push(h)
+  }
+
+  const Label = ({ children }: { children: string }) => (
+    <span className={cx("truncate inline-block align-bottom", labelMaxWClass)}>{children}</span>
+  )
+
   return (
-    <Breadcrumb className={props.className}>
-      <BreadcrumbList>
-        <BreadcrumbItem>
+    <Breadcrumb className={cx("whitespace-nowrap", props.className)}>
+      <BreadcrumbList className="flex-nowrap overflow-hidden">
+        <BreadcrumbItem className="shrink-0">
           <BreadcrumbLink asChild>
-            <Link href={homeHref}>{homeLabel}</Link>
+            <Link href={homeHref} prefetch className="min-w-0">
+              <Label>{homeLabel}</Label>
+            </Link>
           </BreadcrumbLink>
         </BreadcrumbItem>
 
         {view.dropdown.length > 0 ? (
           <>
-            <BreadcrumbSeparator />
-            <BreadcrumbItem>
-              <DropdownMenu>
-                <DropdownMenuTrigger className="flex items-center gap-1">
+            <BreadcrumbSeparator className="shrink-0" />
+            <BreadcrumbItem className="shrink-0">
+              <DropdownMenu open={menuOpen} onOpenChange={setMenuOpen}>
+                <DropdownMenuTrigger className="flex items-center gap-1 shrink-0">
                   <BreadcrumbEllipsis className="size-4" />
                   <span className="sr-only">Toggle menu</span>
                 </DropdownMenuTrigger>
@@ -224,8 +265,14 @@ export function ModuleBreadcrumb(p?: Props) {
 
                     if (href) {
                       return (
-                        <DropdownMenuItem key={uniqKey(label, href, idx)} asChild>
-                          <Link href={href}>{label}</Link>
+                        <DropdownMenuItem
+                          key={uniqKey(label, href, idx)}
+                          onSelect={(e) => {
+                            e.preventDefault()
+                            go(href)
+                          }}
+                        >
+                          <span className="truncate max-w-[14rem]">{label}</span>
                         </DropdownMenuItem>
                       )
                     }
@@ -235,10 +282,11 @@ export function ModuleBreadcrumb(p?: Props) {
                         key={uniqKey(label, "", idx)}
                         onSelect={(e) => {
                           e.preventDefault()
+                          setMenuOpen(false)
                           onSelect?.()
                         }}
                       >
-                        {label}
+                        <span className="truncate max-w-[14rem]">{label}</span>
                       </DropdownMenuItem>
                     )
                   })}
@@ -254,14 +302,18 @@ export function ModuleBreadcrumb(p?: Props) {
 
           return (
             <span key={uniqKey(label, href, idx)} className="contents">
-              <BreadcrumbSeparator />
-              <BreadcrumbItem>
+              <BreadcrumbSeparator className="shrink-0" />
+              <BreadcrumbItem className="min-w-0">
                 {href ? (
                   <BreadcrumbLink asChild>
-                    <Link href={href}>{label}</Link>
+                    <Link href={href} prefetch className="min-w-0">
+                      <Label>{label}</Label>
+                    </Link>
                   </BreadcrumbLink>
                 ) : (
-                  <BreadcrumbPage>{label}</BreadcrumbPage>
+                  <BreadcrumbPage className="min-w-0">
+                    <Label>{label}</Label>
+                  </BreadcrumbPage>
                 )}
               </BreadcrumbItem>
             </span>
@@ -270,9 +322,11 @@ export function ModuleBreadcrumb(p?: Props) {
 
         {view.current ? (
           <>
-            <BreadcrumbSeparator />
-            <BreadcrumbItem>
-              <BreadcrumbPage>{view.current}</BreadcrumbPage>
+            <BreadcrumbSeparator className="shrink-0" />
+            <BreadcrumbItem className="min-w-0">
+              <BreadcrumbPage className="min-w-0">
+                <Label>{view.current}</Label>
+              </BreadcrumbPage>
             </BreadcrumbItem>
           </>
         ) : null}

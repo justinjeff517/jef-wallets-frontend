@@ -1,8 +1,8 @@
 "use client"
 
-import { useEffect, useMemo, useState } from "react"
+import { useEffect, useState } from "react"
 import { useRouter } from "next/navigation"
-import { User } from "lucide-react"
+import { User, LogOut, Settings, LayoutGrid, Moon, Sun } from "lucide-react"
 import { useTheme } from "next-themes"
 import { Switch } from "@/components/ui/switch"
 import {
@@ -12,6 +12,7 @@ import {
   DropdownMenuItem,
   DropdownMenuLabel,
   DropdownMenuSeparator,
+  DropdownMenuGroup,
 } from "@/components/ui/dropdown-menu"
 import {
   AlertDialog,
@@ -24,169 +25,141 @@ import {
   AlertDialogTitle,
 } from "@/components/ui/alert-dialog"
 
-type SessionState = { emp: string | null; ent: string | null }
+import { ModulesDialog } from "@/components/shared/ModulesDialog"
+
+interface LoginDetails {
+  entity_name: string
+  entity_address: string
+  username: string
+}
 
 export function ProfileDropdown() {
   const { theme, setTheme } = useTheme()
   const router = useRouter()
 
-  const [session, setSession] = useState<SessionState>({ emp: null, ent: null })
-  const [isValid, setIsValid] = useState(false)
-
+  const [details, setDetails] = useState<LoginDetails | null>(null)
+  const [isLoading, setIsLoading] = useState(true)
   const [confirmLogoutOpen, setConfirmLogoutOpen] = useState(false)
   const [isLoggingOut, setIsLoggingOut] = useState(false)
 
   useEffect(() => {
-    const fetchSession = async () => {
+    async function loadProfile() {
       try {
-        const res = await fetch("/api/shared/session/validate", {
-          cache: "no-store",
-          credentials: "include",
-        })
-        const data = await res.json().catch(() => null)
-
-        const valid = !!data?.is_valid
-        setIsValid(valid)
-
-        if (valid && data?.payload) {
-          setSession({
-            emp: data.payload.employee_number?.toString() || null,
-            ent: data.payload.entity_number?.toString() || null,
-          })
-        } else {
-          setSession({ emp: null, ent: null })
+        const res = await fetch("/api/shared/get-login-details")
+        if (res.ok) {
+          const data = await res.json()
+          setDetails(data)
         }
       } catch (err) {
-        console.error("Session validation failed", err)
-        setIsValid(false)
-        setSession({ emp: null, ent: null })
+        console.error("Failed to load profile details", err)
+      } finally {
+        setIsLoading(false)
       }
     }
-
-    fetchSession()
+    loadProfile()
   }, [])
 
-  const canLogout = useMemo(() => {
-    return isValid && (session.emp || session.ent) && !isLoggingOut
-  }, [isValid, session.emp, session.ent, isLoggingOut])
-
   const handleLogout = async () => {
-    if (!canLogout) return
     setIsLoggingOut(true)
-
     try {
-      const res = await fetch("/api/shared/session/delete-one", {
-        method: "DELETE",
-        credentials: "include",
-        cache: "no-store",
-      })
-
-      if (!res.ok) {
-        const txt = await res.text().catch(() => "")
-        throw new Error(`Logout failed (${res.status}): ${txt}`)
-      }
-
-      setSession({ emp: null, ent: null })
-      setIsValid(false)
-      setConfirmLogoutOpen(false)
-
+      await fetch("/api/shared/session/delete-one", { method: "DELETE" })
       router.replace("/")
-
-      // HARD reload to guarantee all client/server state resets
-      window.location.reload()
+      router.refresh()
     } catch (error) {
       console.error("Logout failed:", error)
-      setConfirmLogoutOpen(false)
-      router.replace("/")
-      window.location.reload()
     } finally {
       setIsLoggingOut(false)
+      setConfirmLogoutOpen(false)
     }
   }
 
   return (
-    <div className="flex items-center gap-2 text-xs">
-      <span className="font-mono">{session.emp ?? "Profile"}</span>
+    <div className="flex items-center gap-3">
+      {/* Label next to trigger for quick recognition */}
+      {!isLoading && details && (
+        <span className="hidden text-xs font-medium md:block text-muted-foreground">
+          {details.username} @ <span className="text-foreground">{details.entity_name}</span>
+        </span>
+      )}
 
       <DropdownMenu>
         <DropdownMenuTrigger asChild>
-          <button
-            type="button"
-            className="flex h-8 w-8 items-center justify-center rounded-full bg-muted hover:bg-muted/80 focus:ring-2 focus:ring-ring transition"
-            aria-label="Open profile menu"
-          >
-            <User className="h-5 w-5" />
+          <button className="relative flex h-9 w-9 items-center justify-center rounded-full border bg-background hover:bg-muted transition-colors focus:outline-none focus:ring-2 focus:ring-ring">
+            <User className="h-5 w-5 text-muted-foreground" />
           </button>
         </DropdownMenuTrigger>
 
-        <DropdownMenuContent align="end" className="w-52">
-          <DropdownMenuLabel>Account</DropdownMenuLabel>
-
-          {(session.emp || session.ent) && (
-            <div className="px-2 pb-2 text-[10px] text-muted-foreground">
-              {session.emp && (
-                <div>
-                  Emp: <span className="font-mono">{session.emp}</span>
-                </div>
-              )}
-              {session.ent && (
-                <div>
-                  Ent: <span className="font-mono">{session.ent}</span>
-                </div>
-              )}
+        <DropdownMenuContent align="end" className="w-64 p-2">
+          {details ? (
+            <div className="flex flex-col space-y-1 p-2">
+              <p className="text-sm font-semibold leading-none">{details.entity_name}</p>
+              <p className="text-[10px] leading-none text-muted-foreground truncate">
+                {details.entity_address}
+              </p>
+              <div className="mt-2 inline-flex items-center rounded-md bg-secondary px-2 py-0.5 text-[10px] font-medium text-secondary-foreground">
+                User: {details.username}
+              </div>
             </div>
-          )}
-
-          {!isValid && (
-            <div className="px-2 pb-2 text-[10px] text-muted-foreground">
-              Session invalid (logout disabled)
-            </div>
+          ) : (
+            <DropdownMenuLabel>Account</DropdownMenuLabel>
           )}
 
           <DropdownMenuSeparator />
-          <DropdownMenuItem>Profile Settings</DropdownMenuItem>
+
+          <DropdownMenuGroup>
+            {/* Modules Switcher */}
+            <DropdownMenuItem onSelect={(e) => e.preventDefault()} className="p-0">
+              <div className="flex w-full items-center gap-2 px-2 py-1.5">
+                <LayoutGrid className="h-4 w-4 opacity-70" />
+                <ModulesDialog trigger="default" triggerClassName="w-full text-left" />
+              </div>
+            </DropdownMenuItem>
+
+            <DropdownMenuItem>
+              <Settings className="mr-2 h-4 w-4 opacity-70" />
+              <span>Profile Settings</span>
+            </DropdownMenuItem>
+          </DropdownMenuGroup>
+
+          <DropdownMenuSeparator />
+
+          {/* Theme Toggle inside Menu */}
+          <div className="flex items-center justify-between px-2 py-2">
+            <div className="flex items-center gap-2">
+              {theme === "dark" ? <Moon className="h-4 w-4 opacity-70" /> : <Sun className="h-4 w-4 opacity-70" />}
+              <span className="text-xs">Dark Mode</span>
+            </div>
+            <Switch
+              checked={theme === "dark"}
+              onCheckedChange={(checked) => setTheme(checked ? "dark" : "light")}
+            />
+          </div>
+
+          <DropdownMenuSeparator />
 
           <DropdownMenuItem
-            disabled={!isValid}
-            onSelect={(e) => {
-              e.preventDefault()
-              if (!isValid) return
-              setConfirmLogoutOpen(true)
-            }}
+            className="text-destructive focus:bg-destructive focus:text-destructive-foreground"
+            onSelect={() => setConfirmLogoutOpen(true)}
           >
-            Logout
+            <LogOut className="mr-2 h-4 w-4" />
+            <span>Logout</span>
           </DropdownMenuItem>
-
-          <DropdownMenuSeparator />
-          <div className="flex items-center justify-between px-2 py-1.5">
-            <span className="text-xs">Dark Mode</span>
-            <Switch checked={theme === "dark"} onCheckedChange={(s) => setTheme(s ? "dark" : "light")} />
-          </div>
         </DropdownMenuContent>
       </DropdownMenu>
 
-      <AlertDialog
-        open={confirmLogoutOpen}
-        onOpenChange={(open) => {
-          if (!isValid && open) return
-          setConfirmLogoutOpen(open)
-        }}
-      >
+      {/* Logout Confirmation */}
+      <AlertDialog open={confirmLogoutOpen} onOpenChange={setConfirmLogoutOpen}>
         <AlertDialogContent>
           <AlertDialogHeader>
-            <AlertDialogTitle>Confirm Logout</AlertDialogTitle>
+            <AlertDialogTitle>Sign out?</AlertDialogTitle>
             <AlertDialogDescription>
-              {isValid ? "Are you sure you want to sign out?" : "Session is invalid. Logout is disabled."}
+              You will need to log back in to access **{details?.entity_name || "the system"}**.
             </AlertDialogDescription>
           </AlertDialogHeader>
           <AlertDialogFooter>
-            <AlertDialogCancel disabled={isLoggingOut}>Cancel</AlertDialogCancel>
-            <AlertDialogAction
-              onClick={handleLogout}
-              disabled={!canLogout}
-              className="bg-destructive text-destructive-foreground hover:bg-destructive/90"
-            >
-              {isLoggingOut ? "Logging out..." : "Logout"}
+            <AlertDialogCancel>Cancel</AlertDialogCancel>
+            <AlertDialogAction onClick={handleLogout} className="bg-destructive hover:bg-destructive/90">
+              {isLoggingOut ? "Processing..." : "Logout"}
             </AlertDialogAction>
           </AlertDialogFooter>
         </AlertDialogContent>
