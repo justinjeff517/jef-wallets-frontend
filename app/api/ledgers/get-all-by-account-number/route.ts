@@ -6,14 +6,12 @@ import { getEntityNumberFromCookie } from "@/lib/constant"
 export const runtime = "nodejs"
 export const dynamic = "force-dynamic"
 
-const AWS_REGION =
-  (process.env.AWS_REGION || process.env.AWS_DEFAULT_REGION || "ap-southeast-1").trim()
+const AWS_REGION = (process.env.AWS_REGION || process.env.AWS_DEFAULT_REGION || "ap-southeast-1").trim()
 
-const LAMBDA_ARN =
-  (
-    process.env.LAMBDA_ARN ||
-    "arn:aws:lambda:ap-southeast-1:246715082475:function:jef-wallets-ledgers-get-all-by-account-number"
-  ).trim()
+const LAMBDA_ARN = (
+  process.env.LAMBDA_ARN ||
+  "arn:aws:lambda:ap-southeast-1:246715082475:function:jef-wallets-ledgers-get-all-by-account-number"
+).trim()
 
 const client = new LambdaClient({ region: AWS_REGION })
 
@@ -31,9 +29,7 @@ type LedgerItem = {
   created_by: string
   type: "credit" | "debit" | string
   description: string
-  balance_before: number
   amount: number
-  balance_after: number
   elapsed_time: string
 }
 
@@ -89,9 +85,7 @@ function normalizeResponse(raw: any): ApiResponse {
     created_by: asStr(x?.created_by),
     type: asStr(x?.type) as any,
     description: asStr(x?.description),
-    balance_before: asNum(x?.balance_before),
     amount: asNum(x?.amount),
-    balance_after: asNum(x?.balance_after),
     elapsed_time: asStr(x?.elapsed_time),
   }))
 
@@ -140,7 +134,6 @@ export async function GET(req: NextRequest) {
     }
 
     const normalized = normalizeResponse(body)
-
     return NextResponse.json(normalized, { status: 200 })
   } catch (e: any) {
     const out: ApiResponse = { exists: false, message: e?.message || "Server error", ledgers: [] }
