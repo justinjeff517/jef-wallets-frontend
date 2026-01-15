@@ -1,7 +1,15 @@
 "use client";
 
 import React, { useState, useEffect } from "react";
-import { Wallet, History, ArrowRight } from "lucide-react";
+import { 
+  Wallet, 
+  History, 
+  TrendingUp, 
+  TrendingDown, 
+  ArrowUpRight, 
+  ArrowDownLeft,
+  Calendar
+} from "lucide-react";
 
 interface Ledger {
   ledger_id: string;
@@ -12,6 +20,7 @@ interface Ledger {
   created_name: string;
   sender_account_name: string;
   receiver_account_name: string;
+  date_name: string;
 }
 
 export default function LedgerPage() {
@@ -19,96 +28,125 @@ export default function LedgerPage() {
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
-    fetch("/api/wallets/get-all-ledgers-by-entity-number")
+    // UPDATED API ENDPOINT
+    fetch("/api/ledgers/get-all-by-account-number")
       .then((res) => res.json())
       .then((data) => {
         if (data.exists) setLedgers(data.ledgers);
       })
+      .catch(err => console.error("Fetch error:", err))
       .finally(() => setLoading(false));
   }, []);
 
   const latestBalance = ledgers[0]?.balance_after ?? 0;
 
   return (
-    // Background is pure black in dark mode for maximum contrast
-    <div className="min-h-screen bg-white dark:bg-black text-slate-900 dark:text-white">
-      <main className="max-w-md mx-auto px-6 py-12">
-        
-        {/* CRITICAL DATA: Total Balance */}
-        <section className="mb-10 p-5 rounded-xl border-2 border-slate-100 dark:border-slate-800 bg-slate-50/50 dark:bg-white/5">
-          <div className="flex items-center gap-2 mb-2">
-            <Wallet size={16} className="text-slate-600 dark:text-slate-300" />
-            <span className="text-xs font-bold uppercase tracking-wider text-slate-600 dark:text-slate-300">
-              Current Operating Capital
-            </span>
-          </div>
-          <div className="flex items-baseline gap-2">
-            <span className="text-2xl font-bold text-slate-500 dark:text-slate-400">₱</span>
-            <h2 className="text-4xl font-black tracking-tight tabular-nums">
-              {loading ? "---" : latestBalance.toLocaleString(undefined, { minimumFractionDigits: 2 })}
-            </h2>
-          </div>
-        </section>
-
-        <header className="flex items-center justify-between mb-4">
+    <div className="min-h-screen bg-slate-50 dark:bg-[#050505] text-slate-900 dark:text-slate-100 transition-colors duration-300">
+      {/* STICKY HEADER FOR BALANCE */}
+      <nav className="sticky top-0 z-20 bg-white/80 dark:bg-black/80 backdrop-blur-md border-b border-slate-200 dark:border-slate-800">
+        <div className="max-w-md mx-auto px-6 py-4 flex items-center justify-between">
           <div className="flex items-center gap-2">
-            <History size={16} className="text-slate-900 dark:text-white" />
-            <h3 className="text-sm font-bold uppercase text-slate-900 dark:text-white">
-              Transaction History
+            <div className="p-2 bg-emerald-500/10 rounded-lg">
+              <Wallet size={18} className="text-emerald-600 dark:text-emerald-400" />
+            </div>
+            <h1 className="font-bold text-sm tracking-tight">Farm Ledger</h1>
+          </div>
+          <div className="text-right">
+            <p className="text-[10px] font-bold text-slate-400 uppercase tracking-tighter">Current Balance</p>
+            <p className="font-black text-lg tabular-nums">
+              ₱{loading ? "---" : latestBalance.toLocaleString()}
+            </p>
+          </div>
+        </div>
+      </nav>
+
+      <main className="max-w-md mx-auto px-6 py-8 pb-24">
+        
+        {/* QUICK STATS CARDS */}
+        <div className="grid grid-cols-2 gap-3 mb-8">
+          <div className="p-4 rounded-2xl bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800">
+            <TrendingUp size={14} className="text-emerald-500 mb-2" />
+            <p className="text-[10px] font-bold text-slate-500 uppercase">Inflow</p>
+            <p className="text-sm font-bold">Verified</p>
+          </div>
+          <div className="p-4 rounded-2xl bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800">
+            <TrendingDown size={14} className="text-red-500 mb-2" />
+            <p className="text-[10px] font-bold text-slate-500 uppercase">Outflow</p>
+            <p className="text-sm font-bold">Operating</p>
+          </div>
+        </div>
+
+        {/* SECTION HEADER */}
+        <header className="flex items-center justify-between mb-6">
+          <div className="flex items-center gap-2">
+            <History size={16} className="text-slate-400" />
+            <h3 className="text-xs font-black uppercase tracking-widest text-slate-500">
+              Activity Log
             </h3>
           </div>
-          {!loading && (
-            <span className="text-[10px] font-black bg-slate-900 dark:bg-white text-white dark:text-black px-2 py-1 rounded">
-              {ledgers.length} RECORDS
-            </span>
-          )}
+          <span className="text-[10px] font-bold bg-slate-200 dark:bg-slate-800 px-2 py-0.5 rounded-full">
+            {ledgers.length} Records
+          </span>
         </header>
 
-        {/* Ledger List */}
-        <div className="divide-y divide-slate-200 dark:divide-slate-800 border-t border-slate-200 dark:border-slate-800">
+        {/* LEDGER LIST */}
+        <div className="space-y-3">
           {loading ? (
-            [...Array(6)].map((_, i) => (
-              <div key={i} className="py-6 animate-pulse bg-slate-50 dark:bg-slate-900/50" />
+            [...Array(5)].map((_, i) => (
+              <div key={i} className="h-24 w-full rounded-2xl animate-pulse bg-slate-200 dark:bg-slate-900" />
             ))
           ) : (
             ledgers.map((item) => (
-              <div key={item.ledger_id} className="py-5 flex justify-between items-start gap-4">
-                
-                {/* TRANSACTION DETAILS */}
-                <div className="flex-1 min-w-0">
-                  <p className="text-[15px] font-bold leading-tight mb-1 text-slate-900 dark:text-white">
-                    {item.description}
-                  </p>
-                  
-                  {/* Account Flow: Increased brightness for dark mode labels */}
-                  <div className="flex items-center gap-2 text-[11px] font-bold text-slate-600 dark:text-slate-300 mb-1">
-                    <span className="bg-slate-100 dark:bg-slate-800 px-1.5 py-0.5 rounded">
-                      {item.type === 'credit' ? item.sender_account_name : 'FROM: INTERNAL'}
-                    </span>
-                    <ArrowRight size={10} className="text-slate-400" />
-                    <span className="bg-slate-100 dark:bg-slate-800 px-1.5 py-0.5 rounded">
-                      {item.type === 'debit' ? item.receiver_account_name : 'TO: FARM MAIN'}
-                    </span>
+              <div 
+                key={item.ledger_id} 
+                className="group relative p-4 rounded-2xl bg-white dark:bg-slate-900/50 border border-slate-200 dark:border-slate-800 hover:border-slate-400 dark:hover:border-slate-600 transition-all"
+              >
+                <div className="flex justify-between items-start mb-3">
+                  <div className="flex items-center gap-3">
+                    <div className={`p-2 rounded-xl ${
+                      item.type === 'credit' 
+                        ? 'bg-emerald-500/10 text-emerald-600' 
+                        : 'bg-red-500/10 text-red-600'
+                    }`}>
+                      {item.type === 'credit' ? <ArrowDownLeft size={18} /> : <ArrowUpRight size={18} />}
+                    </div>
+                    <div>
+                      <h4 className="text-[14px] font-bold leading-tight line-clamp-1">
+                        {item.description}
+                      </h4>
+                      <div className="flex items-center gap-1 text-[10px] text-slate-500 font-medium mt-0.5">
+                        <Calendar size={10} />
+                        {item.date_name}
+                      </div>
+                    </div>
                   </div>
                   
-                  {/* Metadata: Creator */}
-                  <p className="text-[10px] font-medium text-slate-500 dark:text-slate-400 uppercase tracking-tight">
-                    Recorded by: {item.created_name}
-                  </p>
+                  <div className="text-right">
+                    <p className={`text-[15px] font-black tabular-nums ${
+                      item.type === 'credit' ? 'text-emerald-600 dark:text-emerald-400' : 'text-red-600 dark:text-red-400'
+                    }`}>
+                      {item.type === 'credit' ? '+' : '-'}{item.amount.toLocaleString()}
+                    </p>
+                    <p className="text-[10px] font-bold text-slate-400 tabular-nums">
+                      ₱{item.balance_after.toLocaleString()}
+                    </p>
+                  </div>
                 </div>
 
-                {/* FINANCIAL TOTALS */}
-                <div className="text-right shrink-0">
-                  <div className={`text-lg font-black tabular-nums ${
-                    item.type === 'credit' 
-                      ? 'text-emerald-600 dark:text-emerald-400' 
-                      : 'text-red-600 dark:text-red-400'
-                  }`}>
-                    {item.type === 'credit' ? '+' : '-'}{item.amount.toLocaleString()}
+                {/* TRANSFER PATHWAY */}
+                <div className="flex items-center gap-2 pt-3 border-t border-slate-100 dark:border-slate-800/50">
+                  <div className="flex-1 truncate">
+                    <p className="text-[9px] uppercase font-black text-slate-400 tracking-tighter">Origin</p>
+                    <p className="text-[11px] font-bold truncate">
+                      {item.type === 'credit' ? item.sender_account_name : 'Ellorimo Farm'}
+                    </p>
                   </div>
-                  <div className="text-[11px] font-bold text-slate-500 dark:text-slate-400 mt-1">
-                    <span className="opacity-70 mr-1">BAL:</span>
-                    ₱{item.balance_after.toLocaleString()}
+                  <div className="h-4 w-px bg-slate-200 dark:bg-slate-800" />
+                  <div className="flex-1 truncate text-right">
+                    <p className="text-[9px] uppercase font-black text-slate-400 tracking-tighter">Destination</p>
+                    <p className="text-[11px] font-bold truncate">
+                      {item.type === 'debit' ? item.receiver_account_name : 'Ellorimo Farm'}
+                    </p>
                   </div>
                 </div>
               </div>
@@ -116,9 +154,9 @@ export default function LedgerPage() {
           )}
         </div>
 
-        <footer className="mt-12 py-10 text-center border-t border-slate-100 dark:border-slate-900">
-          <p className="text-[10px] font-black text-slate-400 dark:text-slate-600 uppercase tracking-[0.4em]">
-            Verified Official Record
+        <footer className="mt-16 text-center opacity-30">
+          <p className="text-[9px] font-black uppercase tracking-[0.5em]">
+            End of Transaction Records
           </p>
         </footer>
       </main>
