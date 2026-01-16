@@ -4,9 +4,8 @@
     "sender_account_name":"string",
     "receiver_account_number":"string",
     "receiver_account_name":"string",
-    "type":"debit",
     "description":"string",
     "amount":"number",
-    "ledger_id":"string-uuidv4",
+    "transaction_id":"string-uuidv4",
     "created_by":"string-employee_number"
 }

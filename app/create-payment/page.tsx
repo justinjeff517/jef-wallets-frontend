@@ -250,7 +250,7 @@ async function submit(e: React.FormEvent) {
 
   try {
     const payload = {
-      creator_account_number: senderNumber,
+      account_number: senderNumber,
       sender_account_number: senderNumber,
       sender_account_name: senderName,
       receiver_account_number: asStr(receiver),
