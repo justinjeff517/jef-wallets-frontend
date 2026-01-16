@@ -10,6 +10,8 @@ import {
   RotateCw,
 } from "lucide-react"
 
+// --- Types ---
+
 type TxType = "sender" | "receiver"
 
 type Transaction = {
@@ -31,6 +33,8 @@ type ApiResponse = {
   message: string
   transactions: Transaction[]
 }
+
+// --- Helpers ---
 
 const asStr = (v: unknown) => (typeof v === "string" ? v : "")
 const asNum = (v: unknown) => {
@@ -55,6 +59,99 @@ function firstCommaPart(s: string) {
   return parts.length ? parts[0] : s
 }
 
+// --- Sub-Component: Transaction Item ---
+
+function TransactionItem({ tx }: { tx: Transaction }) {
+  const [isNew, setIsNew] = useState(false)
+  const isSent = tx.type === "sender"
+
+  useEffect(() => {
+    if (!tx.created) return
+
+    const createdTime = new Date(tx.created).getTime()
+    const currentTime = Date.now()
+    const diffSec = (currentTime - createdTime) / 1000
+    const highlightWindow = 30 // seconds
+
+    if (diffSec < highlightWindow) {
+      setIsNew(true)
+
+      // Calculate remaining time to keep the highlight active
+      const remainingMs = (highlightWindow - diffSec) * 1000
+      
+      const timer = setTimeout(() => {
+        setIsNew(false)
+      }, remainingMs)
+
+      return () => clearTimeout(timer)
+    }
+  }, [tx.created])
+
+  return (
+    <div
+      className={`group p-4 rounded-2xl border flex items-center justify-between gap-4 transition-all duration-1000 ease-out
+        ${
+          isNew
+            ? "bg-emerald-50 border-emerald-500 shadow-lg shadow-emerald-100/50 dark:bg-emerald-900/20 dark:border-emerald-500 dark:shadow-none scale-[1.01] z-10"
+            : "bg-white dark:bg-zinc-900 border-zinc-200 dark:border-zinc-800 hover:border-zinc-300 dark:hover:border-zinc-700"
+        }
+      `}
+    >
+      <div className="flex items-center gap-4">
+        <div
+          className={`p-3 rounded-xl transition-colors ${
+            isSent
+              ? "bg-zinc-100 dark:bg-zinc-800 text-zinc-600"
+              : isNew 
+                ? "bg-emerald-100 dark:bg-emerald-500/20 text-emerald-700"
+                : "bg-emerald-50 dark:bg-emerald-500/10 text-emerald-600"
+          }`}
+        >
+          {isSent ? <ArrowUpRight size={20} /> : <ArrowDownLeft size={20} />}
+        </div>
+
+        <div className="flex flex-col">
+          <span className="font-bold text-sm sm:text-base leading-tight">
+            {tx.counterparty_account_name || "—"}
+            {isNew && (
+              <span className="ml-2 inline-flex items-center px-1.5 py-0.5 rounded text-[10px] font-bold bg-emerald-100 text-emerald-800 dark:bg-emerald-900 dark:text-emerald-300 animate-pulse">
+                NEW
+              </span>
+            )}
+          </span>
+          <span className="text-xs text-zinc-500 line-clamp-1">
+            {tx.description || "—"}
+          </span>
+          <div className="flex items-center gap-3 mt-1 text-[10px] font-medium text-zinc-400">
+            <span className="flex items-center gap-1">
+              <Clock size={10} /> {lastCommaPart(tx.created_name)}
+            </span>
+            <span className="flex items-center gap-1">
+              <User size={10} /> {tx.created_by || "—"}
+            </span>
+          </div>
+        </div>
+      </div>
+
+      <div className="text-right flex flex-col items-end">
+        <span
+          className={`text-base sm:text-lg font-mono font-bold ${
+            isSent ? "text-zinc-900 dark:text-zinc-100" : "text-emerald-600"
+          }`}
+        >
+          {isSent ? "-" : "+"}
+          {formatCurrency(asNum(tx.amount))}
+        </span>
+        <span className="text-[10px] font-bold text-zinc-400 uppercase">
+          {firstCommaPart(tx.date_name)}
+        </span>
+      </div>
+    </div>
+  )
+}
+
+// --- Main Component ---
+
 export default function TransactionList() {
   const [accountNumber, setAccountNumber] = useState("1001")
   const [data, setData] = useState<ApiResponse>({
@@ -78,7 +175,9 @@ export default function TransactionList() {
     setLoading(true)
     setError("")
     try {
-      const url = `/api/transactions/get-all-by-account-number?account_number=${encodeURIComponent(acc)}`
+      const url = `/api/transactions/get-all-by-account-number?account_number=${encodeURIComponent(
+        acc
+      )}`
       const res = await fetch(url, { method: "GET", cache: "no-store" })
 
       let payload: any = null
@@ -147,10 +246,15 @@ export default function TransactionList() {
           <div>
             <h1 className="text-2xl font-bold tracking-tight">Transactions</h1>
             <p className="text-zinc-500 font-medium">{headerSubtitle}</p>
-            
+
             {lastRefreshed && (
               <p className="mt-1 text-[10px] text-zinc-400 font-mono uppercase tracking-tighter">
-                Last Refreshed: {lastRefreshed.toLocaleTimeString('en-GB', { hour: '2-digit', minute: '2-digit', second: '2-digit' })} 
+                Last Refreshed:{" "}
+                {lastRefreshed.toLocaleTimeString("en-GB", {
+                  hour: "2-digit",
+                  minute: "2-digit",
+                  second: "2-digit",
+                })}
                 <span className="ml-1 opacity-60">(HH:MM:SS)</span>
               </p>
             )}
@@ -197,64 +301,26 @@ export default function TransactionList() {
           </div>
         ) : (data.transactions || []).length === 0 ? (
           <div className="bg-white dark:bg-zinc-900 p-4 rounded-2xl border border-zinc-200 dark:border-zinc-800">
-            <p className="text-sm font-medium text-zinc-500">No transactions found.</p>
+            <p className="text-sm font-medium text-zinc-500">
+              No transactions found.
+            </p>
           </div>
         ) : (
           <>
-            <div className={`space-y-3 ${loading ? "opacity-50 pointer-events-none" : "opacity-100"} transition-opacity`}>
-              {data.transactions.map((tx) => {
-                const isSent = tx.type === "sender"
-
-                return (
-                  <div
-                    key={tx.transaction_id || `${tx.created}-${tx.counterparty_account_number}`}
-                    className="group bg-white dark:bg-zinc-900 p-4 rounded-2xl border border-zinc-200 dark:border-zinc-800 flex items-center justify-between gap-4 hover:border-zinc-300 dark:hover:border-zinc-700 transition-all"
-                  >
-                    <div className="flex items-center gap-4">
-                      <div
-                        className={`p-3 rounded-xl ${
-                          isSent
-                            ? "bg-zinc-100 dark:bg-zinc-800 text-zinc-600"
-                            : "bg-emerald-50 dark:bg-emerald-500/10 text-emerald-600"
-                        }`}
-                      >
-                        {isSent ? <ArrowUpRight size={20} /> : <ArrowDownLeft size={20} />}
-                      </div>
-
-                      <div className="flex flex-col">
-                        <span className="font-bold text-sm sm:text-base leading-tight">
-                          {tx.counterparty_account_name || "—"}
-                        </span>
-                        <span className="text-xs text-zinc-500 line-clamp-1">
-                          {tx.description || "—"}
-                        </span>
-                        <div className="flex items-center gap-3 mt-1 text-[10px] font-medium text-zinc-400">
-                          <span className="flex items-center gap-1">
-                            <Clock size={10} /> {lastCommaPart(tx.created_name)}
-                          </span>
-                          <span className="flex items-center gap-1">
-                            <User size={10} /> {tx.created_by || "—"}
-                          </span>
-                        </div>
-                      </div>
-                    </div>
-
-                    <div className="text-right flex flex-col items-end">
-                      <span
-                        className={`text-base sm:text-lg font-mono font-bold ${
-                          isSent ? "text-zinc-900 dark:text-zinc-100" : "text-emerald-600"
-                        }`}
-                      >
-                        {isSent ? "-" : "+"}
-                        {formatCurrency(asNum(tx.amount))}
-                      </span>
-                      <span className="text-[10px] font-bold text-zinc-400 uppercase">
-                        {firstCommaPart(tx.date_name)}
-                      </span>
-                    </div>
-                  </div>
-                )
-              })}
+            <div
+              className={`space-y-3 ${
+                loading ? "opacity-50 pointer-events-none" : "opacity-100"
+              } transition-opacity`}
+            >
+              {data.transactions.map((tx) => (
+                <TransactionItem
+                  key={
+                    tx.transaction_id ||
+                    `${tx.created}-${tx.counterparty_account_number}`
+                  }
+                  tx={tx}
+                />
+              ))}
             </div>
 
             <div className="pt-4 border-t border-zinc-200 dark:border-zinc-800 flex justify-between items-center px-2">

@@ -1,6 +1,7 @@
 "use client"
 
 import * as React from "react"
+import { useRouter } from "next/navigation"
 import {
   Check,
   ChevronsUpDown,
@@ -9,6 +10,8 @@ import {
   CreditCard,
   History,
   ArrowDownUp,
+  Loader2,
+  ArrowRight,
 } from "lucide-react"
 
 import { Card, CardContent } from "@/components/ui/card"
@@ -51,7 +54,7 @@ function AccountCombobox(props: {
   onChange: (v: string) => void
   accounts: Account[]
   disabled?: boolean
-  icon: any
+  icon: React.ElementType<any>
 }) {
   const { label, value, onChange, accounts, disabled, icon: Icon } = props
   const [open, setOpen] = React.useState(false)
@@ -135,6 +138,35 @@ function AccountCombobox(props: {
   )
 }
 
+/* ----------------------------- success view ----------------------------- */
+
+function SuccessView({ amount, receiverName }: { amount: string; receiverName: string }) {
+  return (
+    <div className="flex flex-col items-center justify-center min-h-[60vh] animate-in fade-in zoom-in duration-500">
+      <div className="relative mb-8">
+        {/* Animated Rings */}
+        <div className="absolute inset-0 bg-green-500/20 rounded-full animate-ping duration-[2000ms]" />
+        <div className="absolute inset-0 bg-green-500/10 rounded-full animate-ping duration-[2000ms] delay-150" />
+        
+        <div className="relative bg-green-500 text-white p-6 rounded-full shadow-2xl scale-100 flex items-center justify-center">
+          <Check size={48} strokeWidth={4} />
+        </div>
+      </div>
+
+      <h2 className="text-2xl font-black tracking-tight mb-2 text-center">Payment Sent!</h2>
+      <p className="text-muted-foreground text-center mb-8 max-w-[250px]">
+        You successfully sent <strong className="text-foreground">PHP {amount}</strong> to{" "}
+        <strong className="text-foreground">{receiverName}</strong>.
+      </p>
+
+      <div className="flex items-center gap-2 text-xs font-bold text-muted-foreground uppercase tracking-widest animate-pulse">
+        Redirecting
+        <Loader2 size={12} className="animate-spin" />
+      </div>
+    </div>
+  )
+}
+
 /* ----------------------------- page ----------------------------- */
 
 type SenderDetails = {
@@ -144,14 +176,16 @@ type SenderDetails = {
   employee_number: string
 }
 
-type ApiCreateLedgerOk = {
-  ok: boolean
-  lambda?: { StatusCode?: number; FunctionError?: string | null }
-  response?: any
+type ApiSendTxResponse = {
+  is_sent?: boolean
   message?: string
 }
 
+const CREATE_TX_URL = "/api/transactions/sqs-create-one"
+
 export default function WalletsPage() {
+  const router = useRouter()
+  
   const [accounts, setAccounts] = React.useState<Account[]>([])
   const [loadingAccounts, setLoadingAccounts] = React.useState(true)
   const [senderAccount, setSenderAccount] = React.useState<Account | null>(null)
@@ -165,32 +199,36 @@ export default function WalletsPage() {
   const [description, setDescription] = React.useState("")
 
   const [submitting, setSubmitting] = React.useState(false)
+  const [success, setSuccess] = React.useState(false) // New Success State
   const [err, setErr] = React.useState("")
-  const [msg, setMsg] = React.useState("")
   
-  // FIX 1: Add a ref to track submission status synchronously
+  // prevent double submit (sync)
   const isSubmittingRef = React.useRef(false)
+  const didInitRef = React.useRef(false)
 
   React.useEffect(() => {
+    if (didInitRef.current) return
+    didInitRef.current = true
+
     setTransactionId(makeUuid())
-  }, [])
 
-  React.useEffect(() => {
-    let mounted = true
+    let cancelled = false
 
     ;(async () => {
       try {
         setLoadingSender(true)
         const res = await fetch("/api/sender/get-sender-details", { cache: "no-store" })
         const j: SenderDetails = await res.json()
-        if (!mounted) return
-        if (j?.account_number) setSenderAccount({ account_number: j.account_number, account_name: j.account_name })
+        if (cancelled) return
+        if (j?.account_number) {
+          setSenderAccount({ account_number: j.account_number, account_name: j.account_name })
+        }
         if (j?.employee_name) setProcessedByName(j.employee_name)
         if (j?.employee_number) setProcessedByNumber(j.employee_number)
       } catch {
-        if (mounted) setErr("Connection error: failed to sync sender.")
+        if (!cancelled) setErr("Connection error: failed to sync sender.")
       } finally {
-        if (mounted) setLoadingSender(false)
+        if (!cancelled) setLoadingSender(false)
       }
     })()
 
@@ -199,17 +237,17 @@ export default function WalletsPage() {
         setLoadingAccounts(true)
         const res = await fetch("/api/accounts/get-all", { cache: "no-store" })
         const j = await res.json()
-        if (!mounted) return
+        if (cancelled) return
         setAccounts(Array.isArray(j?.accounts) ? j.accounts : [])
       } catch {
-        if (mounted) setErr("Connection error: failed to sync wallets.")
+        if (!cancelled) setErr("Connection error: failed to sync wallets.")
       } finally {
-        if (mounted) setLoadingAccounts(false)
+        if (!cancelled) setLoadingAccounts(false)
       }
     })()
 
     return () => {
-      mounted = false
+      cancelled = true
     }
   }, [])
 
@@ -227,62 +265,106 @@ export default function WalletsPage() {
     !loadingAccounts &&
     !loadingSender &&
     !submitting &&
+    !isSubmittingRef.current &&
+    !success &&
     !!asStr(transactionId) &&
     isFinite(amountNum) &&
     amountNum > 0 &&
     !!senderNumber &&
     !!asStr(receiver) &&
     receiver !== senderNumber &&
+    !!receiverName &&
     !!asStr(processedByNumber) &&
     !!asStr(description)
 
-async function submit(e: React.FormEvent) {
-  e.preventDefault()
+  async function submit(e: React.FormEvent) {
+    e.preventDefault()
 
-  if (isSubmittingRef.current) return
-  if (!canSubmit) return
+    if (isSubmittingRef.current) return
+    if (!canSubmit) return
 
-  isSubmittingRef.current = true
-  setSubmitting(true)
+    isSubmittingRef.current = true
+    setSubmitting(true)
+    setErr("")
 
-  setErr("")
-  setMsg("")
+    try {
+      const payload = {
+        account_number: senderNumber,
+        sender_account_number: senderNumber,
+        sender_account_name: senderName,
+        receiver_account_number: asStr(receiver),
+        receiver_account_name: receiverName,
+        description: asStr(description),
+        amount: amountNum,
+        created_by: asStr(processedByNumber),
+        transaction_id: asStr(transactionId) || makeUuid(),
+      }
 
-  try {
-    const payload = {
-      account_number: senderNumber,
-      sender_account_number: senderNumber,
-      sender_account_name: senderName,
-      receiver_account_number: asStr(receiver),
-      receiver_account_name: receiverName,
-      description: asStr(description),
-      amount: amountNum,
-      created_by: asStr(processedByNumber),
-      transaction_id: asStr(transactionId) || makeUuid(),
+      if (!payload.receiver_account_name) {
+        setErr("Missing receiver_account_name.")
+        return
+      }
+
+      const res = await fetch(CREATE_TX_URL, {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify(payload),
+      })
+
+      if (res.status === 429) {
+        const ra = asStr(res.headers.get("Retry-After") || "")
+        const sec = ra ? Number(ra) : NaN
+        setErr(
+          Number.isFinite(sec) && sec > 0
+            ? `Too many requests. Retry after ${sec}s.`
+            : "Too many requests. Please slow down."
+        )
+        return
+      }
+
+      let j: ApiSendTxResponse | any = {}
+      try {
+        j = await res.json()
+      } catch {
+        j = {}
+      }
+
+      if (!res.ok) {
+        setErr(asStr(j?.message) || `Request failed (${res.status}).`)
+        return
+      }
+
+      if (j?.is_sent === false) {
+        setErr(asStr(j?.message) || "Failed to send.")
+        return
+      }
+
+      // --- SUCCESS FLOW ---
+      setSuccess(true)
+      
+      // Delay redirect to let user see animation (2.5 seconds)
+      setTimeout(() => {
+        router.push("/transactions")
+      }, 2500)
+
+    } catch (e: any) {
+      setErr(asStr(e?.message) || "Failed to submit.")
+    } finally {
+      // Only reset submitting if we failed. 
+      // If success, we stay in submitting/success state until redirect.
+      if (!isSubmittingRef.current) { 
+        // Logic handled in success flow, but if we errored out:
+        isSubmittingRef.current = false
+        setSubmitting(false)
+      } else if (!success) {
+         isSubmittingRef.current = false
+         setSubmitting(false)
+      }
     }
-
-    if (!payload.receiver_account_name) {
-      setErr("Missing receiver_account_name.")
-      return
-    }
-
-    console.log("POST /api/ledgers/create-one payload:", payload)
-
-    setMsg("Payload logged.")
-    setTransactionId(makeUuid())
-    setAmount("")
-    setDescription("")
-    setReceiver("")
-  } catch (e: any) {
-    setErr(asStr(e?.message) || "Failed to log payload.")
-  } finally {
-    isSubmittingRef.current = false
-    setSubmitting(false)
   }
-}
 
   return (
-    <main className="mx-auto w-full max-w-md min-h-screen p-6 pb-20 bg-background text-foreground">
+    <main className="mx-auto w-full max-w-md min-h-screen p-6 pb-20 bg-background text-foreground transition-all">
       <header className="flex items-center justify-between mb-8">
         <div>
           <h1 className="text-2xl font-black tracking-tight">Wallets</h1>
@@ -295,136 +377,140 @@ async function submit(e: React.FormEvent) {
         </div>
       </header>
 
-      <form onSubmit={submit} className="space-y-6">
-        {/* Amount Input */}
-        <div className="space-y-2">
-          <Label className="text-[10px] uppercase tracking-[0.2em] text-muted-foreground font-black block text-center">
-            Transfer Amount (PHP)
-          </Label>
-          <div className="relative group">
-            <div className="absolute left-6 top-1/2 -translate-y-1/2 text-3xl font-black text-muted-foreground/30 group-focus-within:text-foreground transition-colors">
-              ₱
-            </div>
-            <Input
-              className="h-24 pl-12 text-4xl font-black text-center rounded-[2rem] border-2 border-muted bg-card focus-visible:ring-offset-0 focus-visible:ring-foreground transition-all"
-              inputMode="decimal"
-              placeholder="0.00"
-              value={amount}
-              onChange={(e) => {
-                const v = e.target.value.trim()
-                if (v === "" || isMoney(v)) setAmount(v)
-              }}
-            />
-          </div>
-        </div>
-
-        {/* Transfer Path */}
-        <Card className="rounded-[2rem] border border-border bg-card shadow-sm overflow-hidden">
-          <CardContent className="p-5 space-y-4">
-            <div className="space-y-2">
-              <Label className="text-[10px] uppercase tracking-[0.15em] text-muted-foreground font-black ml-1">
-                Source Wallet
-              </Label>
-              <div className="h-16 w-full px-4 rounded-2xl border border-dashed border-border bg-muted/30 flex items-center justify-between">
-                <div className="flex items-center gap-3 min-w-0">
-                  <div className="bg-foreground/5 text-foreground p-2 rounded-xl shrink-0">
-                    <CreditCard size={18} />
-                  </div>
-                  <div className="flex flex-col min-w-0">
-                    <span className="text-sm font-bold truncate">
-                      {loadingSender ? "Syncing..." : senderName || "Main Account"}
-                    </span>
-                    <span className="text-[10px] font-mono text-muted-foreground uppercase truncate">
-                      {senderNumber || "---- ----"}
-                    </span>
-                  </div>
-                </div>
-                <span className="text-[9px] font-bold uppercase px-2 py-1 bg-foreground text-background rounded-lg">
-                  Primary
-                </span>
-              </div>
-            </div>
-
-            <div className="flex items-center justify-center -my-2 relative z-10">
-              <div className="bg-background border-2 border-border p-2 rounded-full text-muted-foreground shadow-sm">
-                <ArrowDownUp size={16} strokeWidth={3} />
-              </div>
-            </div>
-
-            <AccountCombobox
-              label="Recipient Wallet"
-              value={receiver}
-              onChange={setReceiver}
-              accounts={accounts.filter((a) => a.account_number !== senderNumber)}
-              disabled={loadingAccounts || loadingSender || !senderNumber}
-              icon={History}
-            />
-          </CardContent>
-        </Card>
-
-        {/* Audit Details */}
-        <section className="rounded-[2rem] p-5 border border-border bg-card space-y-4">
-          <div className="grid grid-cols-2 gap-4">
-            <div className="space-y-1.5">
-              <Label className="text-[9px] font-black uppercase tracking-widest text-muted-foreground">
-                Authorized By
-              </Label>
-              <div className="h-10 px-3 flex items-center bg-muted/50 border border-border/50 rounded-xl text-[11px] font-black truncate">
-                {processedByName || "—"}
-              </div>
-            </div>
-            <div className="space-y-1.5">
-              <Label className="text-[9px] font-black uppercase tracking-widest text-muted-foreground">
-                Trace Reference
-              </Label>
-              <div className="h-10 px-3 flex items-center bg-muted/50 border border-border/50 rounded-xl text-[10px] font-mono text-muted-foreground truncate uppercase">
-                #{(transactionId || "").split("-")[0] || "—"}
-              </div>
-            </div>
-          </div>
-
-          <div className="space-y-1.5">
-            <Label className="text-[9px] font-black uppercase tracking-widest text-muted-foreground">
-              Note / Memo
+      {success ? (
+        <SuccessView amount={amount} receiverName={receiverName} />
+      ) : (
+        <form onSubmit={submit} className="space-y-6 animate-in fade-in slide-in-from-bottom-4 duration-500">
+          {/* Amount Input */}
+          <div className="space-y-2">
+            <Label className="text-[10px] uppercase tracking-[0.2em] text-muted-foreground font-black block text-center">
+              Transfer Amount (PHP)
             </Label>
-            <Textarea
-              className="min-h-[80px] rounded-xl bg-muted/50 border border-border/50 p-3 text-xs font-medium resize-none focus-visible:ring-foreground"
-              placeholder="What is this transfer for?"
-              value={description}
-              onChange={(e) => setDescription(e.target.value)}
-            />
+            <div className="relative group">
+              <div className="absolute left-6 top-1/2 -translate-y-1/2 text-3xl font-black text-muted-foreground/30 group-focus-within:text-foreground transition-colors">
+                ₱
+              </div>
+              <Input
+                className="h-24 pl-12 text-4xl font-black text-center rounded-[2rem] border-2 border-muted bg-card focus-visible:ring-offset-0 focus-visible:ring-foreground transition-all"
+                inputMode="decimal"
+                placeholder="0.00"
+                value={amount}
+                onChange={(e) => {
+                  const v = e.target.value.trim()
+                  if (v === "" || isMoney(v)) setAmount(v)
+                }}
+                disabled={submitting}
+              />
+            </div>
           </div>
-        </section>
 
-        {/* Status & Submit */}
-        <div className="space-y-3">
-          {err && (
-            <div className="p-4 rounded-2xl bg-neutral-100 text-neutral-900 text-xs font-bold text-center border border-neutral-200">
-              {err}
-            </div>
-          )}
-          {msg && (
-            <div className="p-4 rounded-2xl bg-foreground text-background text-xs font-bold text-center">
-              {msg}
-            </div>
-          )}
+          {/* Transfer Path */}
+          <Card className="rounded-[2rem] border border-border bg-card shadow-sm overflow-hidden">
+            <CardContent className="p-5 space-y-4">
+              <div className="space-y-2">
+                <Label className="text-[10px] uppercase tracking-[0.15em] text-muted-foreground font-black ml-1">
+                  Source Wallet
+                </Label>
+                <div className="h-16 w-full px-4 rounded-2xl border border-dashed border-border bg-muted/30 flex items-center justify-between">
+                  <div className="flex items-center gap-3 min-w-0">
+                    <div className="bg-foreground/5 text-foreground p-2 rounded-xl shrink-0">
+                      <CreditCard size={18} />
+                    </div>
+                    <div className="flex flex-col min-w-0">
+                      <span className="text-sm font-bold truncate">
+                        {loadingSender ? "Syncing..." : senderName || "Main Account"}
+                      </span>
+                      <span className="text-[10px] font-mono text-muted-foreground uppercase truncate">
+                        {senderNumber || "---- ----"}
+                      </span>
+                    </div>
+                  </div>
+                  <span className="text-[9px] font-bold uppercase px-2 py-1 bg-foreground text-background rounded-lg">
+                    Primary
+                  </span>
+                </div>
+              </div>
 
-          <Button
-            className="h-18 w-full rounded-[2rem] font-black text-lg shadow-xl bg-foreground text-background hover:bg-foreground/90 active:scale-[0.98] transition-all disabled:opacity-20 flex gap-3"
-            type="submit"
-            disabled={!canSubmit}
-          >
-            {submitting ? (
-              "Securing..."
-            ) : (
-              <>
-                <ShieldCheck size={22} strokeWidth={2.5} />
-                Authorize Transfer
-              </>
+              <div className="flex items-center justify-center -my-2 relative z-10">
+                <div className="bg-background border-2 border-border p-2 rounded-full text-muted-foreground shadow-sm">
+                  <ArrowDownUp size={16} strokeWidth={3} />
+                </div>
+              </div>
+
+              <AccountCombobox
+                label="Recipient Wallet"
+                value={receiver}
+                onChange={setReceiver}
+                accounts={accounts.filter((a) => a.account_number !== senderNumber)}
+                disabled={loadingAccounts || loadingSender || !senderNumber || submitting}
+                icon={History}
+              />
+            </CardContent>
+          </Card>
+
+          {/* Audit Details */}
+          <section className="rounded-[2rem] p-5 border border-border bg-card space-y-4">
+            <div className="grid grid-cols-2 gap-4">
+              <div className="space-y-1.5">
+                <Label className="text-[9px] font-black uppercase tracking-widest text-muted-foreground">
+                  Authorized By
+                </Label>
+                <div className="h-10 px-3 flex items-center bg-muted/50 border border-border/50 rounded-xl text-[11px] font-black truncate">
+                  {processedByName || "—"}
+                </div>
+              </div>
+              <div className="space-y-1.5">
+                <Label className="text-[9px] font-black uppercase tracking-widest text-muted-foreground">
+                  Trace Reference
+                </Label>
+                <div className="h-10 px-3 flex items-center bg-muted/50 border border-border/50 rounded-xl text-[10px] font-mono text-muted-foreground truncate uppercase">
+                  #{(transactionId || "").split("-")[0] || "—"}
+                </div>
+              </div>
+            </div>
+
+            <div className="space-y-1.5">
+              <Label className="text-[9px] font-black uppercase tracking-widest text-muted-foreground">
+                Note / Memo
+              </Label>
+              <Textarea
+                className="min-h-[80px] rounded-xl bg-muted/50 border border-border/50 p-3 text-xs font-medium resize-none focus-visible:ring-foreground"
+                placeholder="What is this transfer for?"
+                value={description}
+                onChange={(e) => setDescription(e.target.value)}
+                disabled={submitting}
+              />
+            </div>
+          </section>
+
+          {/* Status & Submit */}
+          <div className="space-y-3">
+            {err && (
+              <div className="p-4 rounded-2xl bg-red-50 text-red-900 text-xs font-bold text-center border border-red-200 animate-in fade-in slide-in-from-top-2">
+                {err}
+              </div>
             )}
-          </Button>
-        </div>
-      </form>
+
+            <Button
+              className="h-18 w-full rounded-[2rem] font-black text-lg shadow-xl bg-foreground text-background hover:bg-foreground/90 active:scale-[0.98] transition-all disabled:opacity-50 flex gap-3"
+              type="submit"
+              disabled={!canSubmit}
+            >
+              {submitting ? (
+                <>
+                  <Loader2 size={22} className="animate-spin" />
+                  Securing...
+                </>
+              ) : (
+                <>
+                  <ShieldCheck size={22} strokeWidth={2.5} />
+                  Authorize Transfer
+                </>
+              )}
+            </Button>
+          </div>
+        </form>
+      )}
     </main>
   )
 }

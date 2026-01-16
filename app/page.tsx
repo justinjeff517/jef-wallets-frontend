@@ -5,7 +5,7 @@ import Link from "next/link"
 import { Card, CardContent } from "@/components/ui/card"
 import { Button } from "@/components/ui/button"
 import { Badge } from "@/components/ui/badge"
-import { ArrowRightLeft, ReceiptText, ScanLine, WalletCards, ChevronRight, Loader2, Eye, EyeOff } from "lucide-react"
+import { ArrowRightLeft, History, ScanLine, WalletCards, ChevronRight, Loader2, Eye, EyeOff } from "lucide-react"
 
 export default function Page() {
   const [balance, setBalance] = useState<number | null>(null)
@@ -114,7 +114,8 @@ export default function Page() {
         <div className="grid grid-cols-1 gap-2">
           {[
             { href: "/create-payment", title: "Create Payment", desc: "Scan QR or enter code", icon: ArrowRightLeft, iconBg: "bg-zinc-900 dark:bg-zinc-100", iconCol: "text-white dark:text-zinc-900" },
-            { href: "/ledgers", title: "View Ledgers", desc: "Activity and audit logs", icon: ReceiptText, iconBg: "bg-zinc-100 dark:bg-zinc-800", iconCol: "text-zinc-900 dark:text-zinc-100" }
+            // Replaced Ledgers with Transactions
+            { href: "/transactions", title: "Transactions", desc: "View payment history", icon: History, iconBg: "bg-zinc-100 dark:bg-zinc-800", iconCol: "text-zinc-900 dark:text-zinc-100" }
           ].map((item, i) => (
             <Button key={i} asChild variant="ghost" className="h-auto w-full rounded-[20px] bg-white dark:bg-zinc-900 border border-zinc-100 dark:border-zinc-800 px-4 py-3 hover:bg-zinc-50 dark:hover:bg-zinc-800/50 hover:border-zinc-200 transition-all shadow-sm">
               <Link href={item.href} className="flex items-center w-full">
