@@ -1,6 +1,5 @@
 import { NextRequest, NextResponse } from "next/server"
 import { LambdaClient, InvokeCommand } from "@aws-sdk/client-lambda"
-import { randomUUID } from "crypto"
 import { applyRateLimit } from "@/lib/rateLimiter"
 
 export const runtime = "nodejs"
@@ -34,9 +33,7 @@ export async function POST(req: NextRequest) {
       { message: "Too many requests. Please slow down." },
       {
         status: 429,
-        headers: {
-          "Retry-After": String(retryAfter),
-        },
+        headers: { "Retry-After": String(retryAfter) },
       }
     )
   }
@@ -49,24 +46,22 @@ export async function POST(req: NextRequest) {
       body = null
     }
 
-    const account_number_in = asStr(body?.account_number)
-    const sender_account_number_in = asStr(body?.sender_account_number)
-
-    const account_number = sender_account_number_in || account_number_in
-    if (!account_number) {
-      return NextResponse.json({ ok: false, message: "Missing account_number" }, { status: 400 })
-    }
-
-    const sender_account_number = account_number
+    const creator_account_number = asStr(body?.creator_account_number)
+    const sender_account_number = asStr(body?.sender_account_number)
     const sender_account_name = asStr(body?.sender_account_name)
     const receiver_account_number = asStr(body?.receiver_account_number)
     const receiver_account_name = asStr(body?.receiver_account_name)
-    const type = asStr(body?.type) as "credit" | "debit"
     const description = asStr(body?.description)
     const amount = asNum(body?.amount)
     const created_by = asStr(body?.created_by)
-    const ledger_id = asStr(body?.ledger_id) || randomUUID()
+    const transaction_id = asStr(body?.transaction_id)
 
+    if (!creator_account_number) {
+      return NextResponse.json({ ok: false, message: "Missing creator_account_number" }, { status: 400 })
+    }
+    if (!sender_account_number) {
+      return NextResponse.json({ ok: false, message: "Missing sender_account_number" }, { status: 400 })
+    }
     if (!sender_account_name) {
       return NextResponse.json({ ok: false, message: "Missing sender_account_name" }, { status: 400 })
     }
@@ -75,9 +70,6 @@ export async function POST(req: NextRequest) {
     }
     if (!receiver_account_name) {
       return NextResponse.json({ ok: false, message: "Missing receiver_account_name" }, { status: 400 })
-    }
-    if (type !== "credit" && type !== "debit") {
-      return NextResponse.json({ ok: false, message: "Invalid type (must be credit|debit)" }, { status: 400 })
     }
     if (!description) {
       return NextResponse.json({ ok: false, message: "Missing description" }, { status: 400 })
@@ -88,18 +80,20 @@ export async function POST(req: NextRequest) {
     if (!created_by) {
       return NextResponse.json({ ok: false, message: "Missing created_by" }, { status: 400 })
     }
+    if (!transaction_id) {
+      return NextResponse.json({ ok: false, message: "Missing transaction_id" }, { status: 400 })
+    }
 
     const payload = {
-      account_number,
+      creator_account_number,
       sender_account_number,
       sender_account_name,
       receiver_account_number,
       receiver_account_name,
-      type,
       description,
       amount,
       created_by,
-      ledger_id,
+      transaction_id,
     }
 
     const cmd = new InvokeCommand({

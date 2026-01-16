@@ -159,18 +159,20 @@ export default function WalletsPage() {
   const [processedByName, setProcessedByName] = React.useState("")
   const [processedByNumber, setProcessedByNumber] = React.useState("")
 
-  const type = "debit"
   const [amount, setAmount] = React.useState("")
   const [receiver, setReceiver] = React.useState("")
-  const [ledgerId, setLedgerId] = React.useState("")
+  const [transactionId, setTransactionId] = React.useState("")
   const [description, setDescription] = React.useState("")
 
   const [submitting, setSubmitting] = React.useState(false)
   const [err, setErr] = React.useState("")
   const [msg, setMsg] = React.useState("")
+  
+  // FIX 1: Add a ref to track submission status synchronously
+  const isSubmittingRef = React.useRef(false)
 
   React.useEffect(() => {
-    setLedgerId(makeUuid())
+    setTransactionId(makeUuid())
   }, [])
 
   React.useEffect(() => {
@@ -225,7 +227,7 @@ export default function WalletsPage() {
     !loadingAccounts &&
     !loadingSender &&
     !submitting &&
-    !!asStr(ledgerId) &&
+    !!asStr(transactionId) &&
     isFinite(amountNum) &&
     amountNum > 0 &&
     !!senderNumber &&
@@ -236,24 +238,29 @@ export default function WalletsPage() {
 
   async function submit(e: React.FormEvent) {
     e.preventDefault()
+
+    // FIX 2: Check the synchronous ref immediately to block double-clicks
+    if (isSubmittingRef.current) return
     if (!canSubmit) return
 
+    // FIX 3: Lock immediately
+    isSubmittingRef.current = true
     setSubmitting(true)
+    
     setErr("")
     setMsg("")
 
     try {
       const payload = {
-        account_number: senderNumber,
+        creator_account_number: senderNumber,
         sender_account_number: senderNumber,
         sender_account_name: senderName,
         receiver_account_number: asStr(receiver),
         receiver_account_name: receiverName,
-        type,
         description: asStr(description),
         amount: amountNum,
         created_by: asStr(processedByNumber),
-        ledger_id: asStr(ledgerId) || makeUuid(),
+        transaction_id: asStr(transactionId) || makeUuid(),
       }
 
       if (!payload.receiver_account_name) {
@@ -284,14 +291,16 @@ export default function WalletsPage() {
         return
       }
 
-      setMsg("Transfer complete.")
-      setLedgerId(makeUuid())
+      setMsg("Transfer submitted.")
+      setTransactionId(makeUuid())
       setAmount("")
       setDescription("")
       setReceiver("")
     } catch (e: any) {
       setErr(asStr(e?.message) || "Transaction failed.")
     } finally {
+      // FIX 4: Unlock in the finally block
+      isSubmittingRef.current = false
       setSubmitting(false)
     }
   }
@@ -393,7 +402,7 @@ export default function WalletsPage() {
                 Trace Reference
               </Label>
               <div className="h-10 px-3 flex items-center bg-muted/50 border border-border/50 rounded-xl text-[10px] font-mono text-muted-foreground truncate uppercase">
-                #{(ledgerId || "").split("-")[0] || "—"}
+                #{(transactionId || "").split("-")[0] || "—"}
               </div>
             </div>
           </div>

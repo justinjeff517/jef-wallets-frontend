@@ -4,97 +4,49 @@ import { applyRateLimit } from "@/lib/rateLimiter"
 import { getEntityNumberFromCookie } from "@/lib/constant"
 
 export const runtime = "nodejs"
-export const dynamic = "force-dynamic"
 
 const AWS_REGION = (process.env.AWS_REGION || process.env.AWS_DEFAULT_REGION || "ap-southeast-1").trim()
 
-const LAMBDA_ARN = (
+const LAMBDA_ARN =
   process.env.LAMBDA_ARN ||
   "arn:aws:lambda:ap-southeast-1:246715082475:function:jef-wallets-ledgers-get-all-by-account-number"
-).trim()
 
 const client = new LambdaClient({ region: AWS_REGION })
 
-type LedgerItem = {
-  account_number: string
-  sender_account_number: string
-  sender_account_name: string
-  receiver_account_number: string
-  receiver_account_name: string
-  ledger_id: string
-  date: string
-  date_name: string
-  created: string
-  created_name: string
-  created_by: string
-  type: "credit" | "debit" | string
-  description: string
-  amount: number
-  elapsed_time: string
-}
-
-type ApiResponse = {
-  exists: boolean
-  message: string
-  ledgers: LedgerItem[]
-}
-
-function decodePayload(payload: any) {
-  if (!payload) return { text: "", body: null }
-  const text = Buffer.from(payload).toString("utf-8").trim()
-  if (!text) return { text: "", body: null }
-  try {
-    return { text, body: JSON.parse(text) }
-  } catch {
-    return { text, body: text }
-  }
-}
-
-function asBool(v: any) {
-  if (typeof v === "boolean") return v
-  if (typeof v === "string") return v.trim().toLowerCase() === "true"
-  return false
-}
-
-function asNum(v: any) {
-  const n = typeof v === "number" ? v : Number(v)
-  return Number.isFinite(n) ? n : 0
-}
-
-function asStr(v: any) {
+function asStr(v: unknown) {
   return typeof v === "string" ? v.trim() : ""
 }
 
-function normalizeResponse(raw: any): ApiResponse {
-  const src = raw && typeof raw === "object" ? raw : {}
-  const exists = asBool(src.exists)
-  const message = asStr(src.message)
-  const ledgersIn = Array.isArray(src.ledgers) ? src.ledgers : []
+function safeJsonParse(text: string) {
+  try {
+    return JSON.parse(text)
+  } catch {
+    return null
+  }
+}
 
-  const ledgers: LedgerItem[] = ledgersIn.map((x: any) => ({
-    account_number: asStr(x?.account_number),
-    sender_account_number: asStr(x?.sender_account_number),
-    sender_account_name: asStr(x?.sender_account_name),
-    receiver_account_number: asStr(x?.receiver_account_number),
-    receiver_account_name: asStr(x?.receiver_account_name),
-    ledger_id: asStr(x?.ledger_id),
-    date: asStr(x?.date),
-    date_name: asStr(x?.date_name),
-    created: asStr(x?.created),
-    created_name: asStr(x?.created_name),
-    created_by: asStr(x?.created_by),
-    type: asStr(x?.type) as any,
-    description: asStr(x?.description),
-    amount: asNum(x?.amount),
-    elapsed_time: asStr(x?.elapsed_time),
-  }))
+function decodePayload(payload?: Uint8Array) {
+  if (!payload) return ""
+  return new TextDecoder("utf-8").decode(payload)
+}
 
-  return { exists, message, ledgers }
+function decodeApiGwBody(outer: any) {
+  if (!outer || typeof outer !== "object") return { inner: null as any, innerRaw: "" }
+
+  const isB64 = !!outer.isBase64Encoded
+  const body = outer.body
+
+  if (typeof body !== "string") {
+    return { inner: body ?? null, innerRaw: body ? JSON.stringify(body) : "" }
+  }
+
+  const bodyText = isB64 ? Buffer.from(body, "base64").toString("utf-8") : body
+  const inner = bodyText ? safeJsonParse(bodyText) : null
+  return { inner, innerRaw: bodyText }
 }
 
 export async function GET(req: NextRequest) {
   const { allowed, retryAfter } = await applyRateLimit(req)
-
   if (!allowed) {
     return NextResponse.json(
       { message: "Too many requests. Please slow down." },
@@ -102,41 +54,61 @@ export async function GET(req: NextRequest) {
     )
   }
 
+  const entity_number = await getEntityNumberFromCookie()
+  const account_number = asStr(entity_number)
+
+  if (!account_number) {
+    return NextResponse.json({ message: "Missing entity_number in session." }, { status: 401 })
+  }
+
   try {
-    const entity_number = (await getEntityNumberFromCookie()).trim()
-
-    if (!entity_number) {
-      const out: ApiResponse = { exists: false, message: "Unauthorized", ledgers: [] }
-      return NextResponse.json(out, { status: 401 })
-    }
-
-    const payload = { account_number: entity_number }
-
     const cmd = new InvokeCommand({
       FunctionName: LAMBDA_ARN,
       InvocationType: "RequestResponse",
-      Payload: Buffer.from(JSON.stringify(payload), "utf-8"),
+      Payload: new TextEncoder().encode(JSON.stringify({ account_number })),
     })
 
     const resp = await client.send(cmd)
 
-    const status_code = resp?.StatusCode ?? 0
-    const function_error = resp?.FunctionError ?? null
+    const functionError = asStr(resp.FunctionError)
+    const raw = decodePayload(resp.Payload)
+    const outer = raw ? safeJsonParse(raw) : null
 
-    const { text, body } = decodePayload(resp?.Payload)
-
-    if (function_error) {
-      const out: ApiResponse = { exists: false, message: "Lambda error", ledgers: [] }
+    if (!outer) {
       return NextResponse.json(
-        { ...out, status_code, function_error, raw: text, response: body },
-        { status: 502 }
+        { message: "Unexpected lambda response (not JSON).", function_error: functionError || null, raw },
+        { status: 502, headers: { "cache-control": "no-store" } }
       )
     }
 
-    const normalized = normalizeResponse(body)
-    return NextResponse.json(normalized, { status: 200 })
+    if (functionError) {
+      return NextResponse.json(
+        { message: "Lambda error.", function_error: functionError, response: outer, raw },
+        { status: 502, headers: { "cache-control": "no-store" } }
+      )
+    }
+
+    const looksLikeProxy = typeof outer?.statusCode === "number" || ("body" in outer && outer.body !== undefined)
+
+    if (!looksLikeProxy) {
+      return NextResponse.json(outer, { status: 200, headers: { "cache-control": "no-store" } })
+    }
+
+    const lambdaStatus = Number(outer.statusCode) || 200
+    const { inner, innerRaw } = decodeApiGwBody(outer)
+
+    if (inner === null) {
+      return NextResponse.json(
+        { message: "Unexpected lambda body format.", statusCode: lambdaStatus, body: innerRaw || outer.body || null },
+        { status: 502, headers: { "cache-control": "no-store" } }
+      )
+    }
+
+    return NextResponse.json(inner, { status: lambdaStatus, headers: { "cache-control": "no-store" } })
   } catch (e: any) {
-    const out: ApiResponse = { exists: false, message: e?.message || "Server error", ledgers: [] }
-    return NextResponse.json(out, { status: 500 })
+    return NextResponse.json(
+      { message: "Failed to invoke lambda.", error: asStr(e?.message) || String(e) },
+      { status: 500, headers: { "cache-control": "no-store" } }
+    )
   }
 }
