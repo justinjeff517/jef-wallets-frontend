@@ -236,74 +236,50 @@ export default function WalletsPage() {
     !!asStr(processedByNumber) &&
     !!asStr(description)
 
-  async function submit(e: React.FormEvent) {
-    e.preventDefault()
+async function submit(e: React.FormEvent) {
+  e.preventDefault()
 
-    // FIX 2: Check the synchronous ref immediately to block double-clicks
-    if (isSubmittingRef.current) return
-    if (!canSubmit) return
+  if (isSubmittingRef.current) return
+  if (!canSubmit) return
 
-    // FIX 3: Lock immediately
-    isSubmittingRef.current = true
-    setSubmitting(true)
-    
-    setErr("")
-    setMsg("")
+  isSubmittingRef.current = true
+  setSubmitting(true)
 
-    try {
-      const payload = {
-        creator_account_number: senderNumber,
-        sender_account_number: senderNumber,
-        sender_account_name: senderName,
-        receiver_account_number: asStr(receiver),
-        receiver_account_name: receiverName,
-        description: asStr(description),
-        amount: amountNum,
-        created_by: asStr(processedByNumber),
-        transaction_id: asStr(transactionId) || makeUuid(),
-      }
+  setErr("")
+  setMsg("")
 
-      if (!payload.receiver_account_name) {
-        setErr("Missing receiver_account_name.")
-        return
-      }
-
-      const res = await fetch("/api/ledgers/sqs-create-one", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(payload),
-      })
-
-      let j: ApiCreateLedgerOk | any = null
-      try {
-        j = await res.json()
-      } catch {
-        j = null
-      }
-
-      if (!res.ok || !j?.ok) {
-        const m =
-          asStr(j?.message) ||
-          asStr(j?.response?.message) ||
-          asStr(j?.response?.error) ||
-          "Transaction failed."
-        setErr(m)
-        return
-      }
-
-      setMsg("Transfer submitted.")
-      setTransactionId(makeUuid())
-      setAmount("")
-      setDescription("")
-      setReceiver("")
-    } catch (e: any) {
-      setErr(asStr(e?.message) || "Transaction failed.")
-    } finally {
-      // FIX 4: Unlock in the finally block
-      isSubmittingRef.current = false
-      setSubmitting(false)
+  try {
+    const payload = {
+      creator_account_number: senderNumber,
+      sender_account_number: senderNumber,
+      sender_account_name: senderName,
+      receiver_account_number: asStr(receiver),
+      receiver_account_name: receiverName,
+      description: asStr(description),
+      amount: amountNum,
+      created_by: asStr(processedByNumber),
+      transaction_id: asStr(transactionId) || makeUuid(),
     }
+
+    if (!payload.receiver_account_name) {
+      setErr("Missing receiver_account_name.")
+      return
+    }
+
+    console.log("POST /api/ledgers/create-one payload:", payload)
+
+    setMsg("Payload logged.")
+    setTransactionId(makeUuid())
+    setAmount("")
+    setDescription("")
+    setReceiver("")
+  } catch (e: any) {
+    setErr(asStr(e?.message) || "Failed to log payload.")
+  } finally {
+    isSubmittingRef.current = false
+    setSubmitting(false)
   }
+}
 
   return (
     <main className="mx-auto w-full max-w-md min-h-screen p-6 pb-20 bg-background text-foreground">
